@@ -408,7 +408,6 @@ def main():
     fh_in = None
     path_in = "/dev/stdin"
     for tok in rest:
-        print(tok)
         if tok.startswith("-D") and len(tok) > 2:
             args.D.append(tok[2:])
         elif tok.startswith("-U") and len(tok) > 2:
