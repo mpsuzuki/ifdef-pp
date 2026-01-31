@@ -398,19 +398,24 @@ def main():
         help = "Debug mode")
     parser.add_argument("--patch", action = "store_true",
         help = "Emit as an unified patch")
+    parser.add_argument("--no-mkdir", action = "store_true",
+        help = "Do not make parental directories during output")
     parser.add_argument("--analyze-header-guard", action = "store_true",
         help = "Treat header guards (#ifndef X, #define X, #endif) as normal conditions.\n"
                "By default, macros used in header guards cannot be defined by -D.")
 
     args, rest = parser.parse_known_args()
     fh_in = None
+    path_in = "/dev/stdin"
     for tok in rest:
+        print(tok)
         if tok.startswith("-D") and len(tok) > 2:
             args.D.append(tok[2:])
         elif tok.startswith("-U") and len(tok) > 2:
             args.U.append(tok[2:])
         elif os.path.exists(tok) and os.access(tok, os.R_OK):
             if fh_in is None:
+                path_in = tok
                 fh_in = open(tok, "r")
             else:
                 sys.stderr.write("Cannot accept multiple input files")
@@ -418,6 +423,16 @@ def main():
 
     if fh_in is None:
         fh_in = sys.stdin
+
+    if args.o:
+        path_out = args.o
+        if args.no_mkdir is False:
+            Path(args.o).parent.mkdir(parents = True, exist_ok = True)
+        fh_out = open(args.o, "w")
+    else:
+        path_out = "/dev/stdout"
+        fh_out = sys.stdout
+
     objs = parse_input(fh_in)
 
     if not args.analyze_header_guard:
@@ -442,8 +457,8 @@ def main():
         source_original = [lo.text for lo in objs]
         for line in difflib.unified_diff( source_original,
                                           source_processed,
-                                          fromfile = "a.txt",
-                                          tofile = "b.txt",
+                                          fromfile = path_in,
+                                          tofile = path_out,
                                           lineterm = "" ):
             print(line)
     else:
