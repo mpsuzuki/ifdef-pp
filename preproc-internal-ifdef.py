@@ -385,6 +385,15 @@ def detect_header_guard(objs, debug = False):
     # decide this is header guard.
     return (if_idx, define_idx, endif_idx, macro)
 
+def get_words_from_file(path_file):
+    words = []
+    with open(path_file, "r") as fh:
+        for line in fh.read().splitlines():
+            tok = re.sub(r"#.*", "", line).strip()
+            if tok:
+                words.append(tok)
+    return words
+
 def main():
     parser = argparse.ArgumentParser(
         formatter_class = argparse.RawTextHelpFormatter
@@ -410,6 +419,10 @@ def main():
     parser.add_argument("--analyze-header-guard", action = "store_true",
         help = "Treat header guards (#ifndef X, #define X, #endif) as normal conditions.\n"
                "By default, macros used in header guards cannot be defined by -D.")
+    parser.add_argument("--list-macros-define", type = str,
+        help = "Read file of symbols to be defined")
+    parser.add_argument("--list-macros-undefine", type = str,
+        help = "Read file of symbols to be undefined")
 
     args, rest = parser.parse_known_args()
     fh_in = None
@@ -426,6 +439,12 @@ def main():
             else:
                 sys.stderr.write("Cannot accept multiple input files")
                 return -1
+
+    if args.list_macros_define:
+        args.D += get_words_from_file(args.list_macros_define)
+
+    if args.list_macros_undefine:
+        args.U += get_words_from_file(args.list_macros_undefine)
 
     if fh_in is None:
         fh_in = sys.stdin
@@ -451,7 +470,10 @@ def main():
             path_patch = args.patch_output
         elif args.o is not None:
             path_patch = args.o + args.patch_suffix
-        if path_patch is not None:
+
+        if path_patch in [None, 0, "-", "stdout", "/dev/stdout"]:
+            fh_patch = sys.stdout
+        else:
             if args.dest_dir:
                 tmp_path_patch = Path(args.dest_dir) / Path(path_patch)
             else:
@@ -460,8 +482,6 @@ def main():
                 tmp_path_patch.parent.mkdir(parents = True, exist_ok = True)
             fh_patch = open(tmp_path_patch, "w")
             print(f"# write {tmp_path_patch}", file = sys.stderr)
-        else:
-            fh_patch = sys.stdout
 
     objs = parse_input(fh_in)
 
