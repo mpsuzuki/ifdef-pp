@@ -39,6 +39,12 @@ class LineObj:
     local_conds: List[CondAtom] = field(default_factory=list)
     effective_conds: List[CondAtom] = field(default_factory=list)
 
+@dataclass
+class AppleLibcBlock:
+    begin_libc: Optional[int]
+    end_libc: Optional[int]
+    is_empty: bool = True
+
 regex_misc   = re.compile(r'^\s*#\s*([A-Za-z_]\w*)')
 regex_ifdef  = re.compile(r'^\s*#\s*ifdef\s+(\w+)\b')
 regex_ifndef = re.compile(r'^\s*#\s*ifndef\s+(\w+)\b')
@@ -49,11 +55,9 @@ regex_elif   = re.compile(r'^\s*#\s*elif\b(.*)')
 regex_else   = re.compile(r'^\s*#\s*else\b')
 regex_endif  = re.compile(r'^\s*#\s*endif\b')
 
-def parse_input(fh_in):
+def parse_lines(lines):
     objs: List[LineObj] = []
     if_stack: List[int] = []
-
-    lines = fh_in.read().splitlines()
 
     for idx, line in enumerate(lines):
         lo = LineObj(text=line)
@@ -290,11 +294,24 @@ def eval_effective_conds(effective_conds, defined_set, undefined_set):
 
     return True
 
-def filter_output_lines(objs, defined_set, undefined_set):
-    out = []
-    for lo in objs:
-        if eval_effective_conds(lo.effective_conds, defined_set, undefined_set):
-            out.append(lo.text)
+def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks):
+    idx_to_remove = set()
+    for idx, lo in enumerate(objs):
+        if not eval_effective_conds(lo.effective_conds, defined_set, undefined_set):
+            idx_to_remove.add(idx)
+            continue
+
+        for blk in apple_libc_blocks:
+            if blk.begin_libc < idx < blk.end_libc:
+                blk.is_empty = False
+
+    for blk in apple_libc_blocks:
+        if blk.is_empty:
+            idx_to_remove.add(blk.begin_libc)
+            idx_to_remove.add(blk.end_libc)
+
+    out = [lo.text for idx, lo in enumerate(objs) if idx not in idx_to_remove]
+
     return out
 
 def detect_header_guard(objs, debug = False):
@@ -394,6 +411,37 @@ def get_words_from_file(path_file):
                 words.append(tok)
     return words
 
+def open_fh_to_write(do_mkdir, str_dest_dir, str_path, file_suffix):
+    if str_path in [None, "-", 0, "stdout", "/dev/stdout", sys.stdout]:
+        return ("/dev/stdout", sys.stdout)
+    elif file_suffix:
+        pth = Path( str_path + file_suffix )
+    else:
+        pth = Path( str_path )
+
+    if str_dest_dir:
+        pth = Path( str_dest_dir ) / pth
+
+    if do_mkdir:
+        pth.parent.mkdir( parents = True, exist_ok = True )
+
+    fh = open( pth, "w" )
+    return ( str(pth), fh )
+
+def collect_apple_libc_blocks(lines):
+    regex_begin_libc = re.compile(r"^\s*//\s*Begin-Libc\s*$")
+    regex_end_libc   = re.compile(r"^\s*//\s*End-Libc\s*$")
+    blocks = []
+    for idx, line in enumerate(lines):
+        if regex_begin_libc.match(line):
+            blocks.append( AppleLibcBlock(idx, None, True) )
+        elif regex_end_libc.match(line):
+            if blocks[-1].end_libc:
+                blocks.append( AppleLibcBlock(None, None, True) )
+            blocks[-1].end_libc = idx
+    blocks = [blk for blk in blocks if blk.begin_libc and blk.end_libc]
+    return blocks
+
 def main():
     parser = argparse.ArgumentParser(
         formatter_class = argparse.RawTextHelpFormatter
@@ -449,41 +497,19 @@ def main():
     if fh_in is None:
         fh_in = sys.stdin
 
-    if args.o:
-        path_out = args.o
-        if not args.patch:
-            if args.dest_dir:
-                tmp_path_out = Path(args.dest_dir) / Path(args.o)
-            else:
-                tmp_path_out = Path(args.o)
-            if args.no_mkdir is False:
-                tmp_path_out.parent.mkdir(parents = True, exist_ok = True)
-            fh_out = open(tmp_path_out, "w")
-            print(f"# write {tmp_path_out}", file = sys.stderr)
-    else:
-        path_out = "/dev/stdout"
-        fh_out = sys.stdout
+    path_out, fh_out = open_fh_to_write( not(args.no_mkdir), args.dest_dir, args.o, None )
+    if fh_out != sys.stdout:
+        print(f"# write {path_out}", file = sys.stderr)
 
-    path_patch = None
-    if args.patch:
-        if args.patch_output:
-            path_patch = args.patch_output
-        elif args.o is not None:
-            path_patch = args.o + args.patch_suffix
+    path_patch, fh_patch = open_fh_to_write( not(args.no_mkdir), args.dest_dir,
+                                             args.patch_output if args.patch_output else args.o,
+                                             None if args.patch_output else args.patch_suffix )
+    if fh_patch != sys.stdout:
+        print(f"# write {path_patch}", file = sys.stderr)
 
-        if path_patch in [None, 0, "-", "stdout", "/dev/stdout"]:
-            fh_patch = sys.stdout
-        else:
-            if args.dest_dir:
-                tmp_path_patch = Path(args.dest_dir) / Path(path_patch)
-            else:
-                tmp_path_patch = Path(path_patch)
-            if args.no_mkdir is False:
-                tmp_path_patch.parent.mkdir(parents = True, exist_ok = True)
-            fh_patch = open(tmp_path_patch, "w")
-            print(f"# write {tmp_path_patch}", file = sys.stderr)
-
-    objs = parse_input(fh_in)
+    lines = fh_in.read().splitlines()
+    apple_libc_blocks = collect_apple_libc_blocks(lines)
+    objs = parse_lines(lines)
 
     if not args.analyze_header_guard:
         guard = detect_header_guard(objs, args.debug)
@@ -501,14 +527,14 @@ def main():
             eff   = ",".join(f"{a.kind.value}:{a.macro or '*'}" for a in lo.effective_conds)
             print(f"[DEBUG] {local:20s} {eff:20s} {lo.text}")
 
-    source_processed = filter_output_lines(objs, args.D, args.U)
+    source_processed = filter_output_lines(objs, args.D, args.U, apple_libc_blocks)
 
     if args.patch:
         source_original = [lo.text for lo in objs]
         for line in difflib.unified_diff( source_original,
                                           source_processed,
                                           fromfile = path_in,
-                                          tofile = path_out,
+                                          tofile = args.o,
                                           lineterm = "" ):
             print(line, file = fh_patch)
         if fh_patch != sys.stdout:
