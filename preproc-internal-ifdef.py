@@ -4,6 +4,7 @@ import sys
 import os
 import re
 import difflib
+from pathlib import Path
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Optional, List
@@ -394,10 +395,16 @@ def main():
                         help = "Undefine macro")
     parser.add_argument("-o", type = str, default = None,
                         help = "Write output to <pathname>")
+    parser.add_argument("--dest-dir", "--destdir", type = str, default = None,
+        help = "Set DESTDIR to emit output files")
     parser.add_argument("--debug", action = "store_true",
         help = "Debug mode")
     parser.add_argument("--patch", action = "store_true",
         help = "Emit as an unified patch")
+    parser.add_argument("--patch-output", type = str,
+        help = "Emit unified patch output to file")
+    parser.add_argument("--patch-suffix", type = str, default = ".diff",
+        help = "Set suffix for patch output")
     parser.add_argument("--no-mkdir", action = "store_true",
         help = "Do not make parental directories during output")
     parser.add_argument("--analyze-header-guard", action = "store_true",
@@ -425,12 +432,36 @@ def main():
 
     if args.o:
         path_out = args.o
-        if args.no_mkdir is False:
-            Path(args.o).parent.mkdir(parents = True, exist_ok = True)
-        fh_out = open(args.o, "w")
+        if not args.patch:
+            if args.dest_dir:
+                tmp_path_out = Path(args.dest_dir) / Path(args.o)
+            else:
+                tmp_path_out = Path(args.o)
+            if args.no_mkdir is False:
+                tmp_path_out.parent.mkdir(parents = True, exist_ok = True)
+            fh_out = open(tmp_path_out, "w")
+            print(f"# write {tmp_path_out}", file = sys.stderr)
     else:
         path_out = "/dev/stdout"
         fh_out = sys.stdout
+
+    path_patch = None
+    if args.patch:
+        if args.patch_output:
+            path_patch = args.patch_output
+        elif args.o is not None:
+            path_patch = args.o + args.patch_suffix
+        if path_patch is not None:
+            if args.dest_dir:
+                tmp_path_patch = Path(args.dest_dir) / Path(path_patch)
+            else:
+                tmp_path_patch = Path(path_patch)
+            if args.no_mkdir is False:
+                tmp_path_patch.parent.mkdir(parents = True, exist_ok = True)
+            fh_patch = open(tmp_path_patch, "w")
+            print(f"# write {tmp_path_patch}", file = sys.stderr)
+        else:
+            fh_patch = sys.stdout
 
     objs = parse_input(fh_in)
 
@@ -459,10 +490,14 @@ def main():
                                           fromfile = path_in,
                                           tofile = path_out,
                                           lineterm = "" ):
-            print(line)
+            print(line, file = fh_patch)
+        if fh_patch != sys.stdout:
+            fh_patch.close()
     else:
         for line in source_processed:
-            print(line)
+            print(line, file = fh_out)
+        if fh_out != sys.stdout:
+            fh_out.close()
 
 if __name__ == "__main__":
     main()
