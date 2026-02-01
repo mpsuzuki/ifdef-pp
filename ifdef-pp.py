@@ -178,20 +178,29 @@ def parse_lines(lines):
 
 
 def propagate_effective_conditions(objs: List[LineObj]):
+    """
+    Propagate conditions downward.
+    effective_conds = conditions required for THIS line to appear.
+    local_conds     = conditions introduced BY this line (affecting following lines).
+    cond_stack      = accumulated D/U/N conditions from outer scopes.
+    """
     cond_stack: List[List[CondAtom]] = [[]]
 
     for idx, lo in enumerate(objs):
 
         if lo.directive in (DirectiveKind.IFDEF, DirectiveKind.IFNDEF):
-            macro = lo.local_conds[0].macro
-            lo.effective_conds = [CondAtom(CondType.NEUTRAL, macro)]
+            # effective_conds = outer conditions + neutralized local conds
+            lo.effective_conds = cond_stack[-1].copy()
+            for atom in lo.local_conds:
+                lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
+
+            # push new layer
             new_layer = cond_stack[-1] + lo.local_conds
             cond_stack.append(new_layer)
             continue
 
         elif lo.directive == DirectiveKind.IF:
-            # this tool does not evaluate complex conditions
-            lo.effective_conds = cond_stack[-1][:]
+            lo.effective_conds = cond_stack[-1].copy()
             new_layer = cond_stack[-1] + lo.local_conds
             cond_stack.append(new_layer)
             continue
@@ -200,17 +209,16 @@ def propagate_effective_conditions(objs: List[LineObj]):
             parent_idx = lo.related_if
             parent = objs[parent_idx]
 
-            # effective_conds is combination of neutralized parental & my local_conds
-            lo.effective_conds = []
+            # outer conditions (one level above the whole if-chain)
+            outer = cond_stack[-2].copy()
 
-            # set effective_conds by neutralized parental local_conds
-            for atom in parent.local_conds:
-                lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
-
-            # neutralized my local_conds
-            for atom in lo.local_conds:
-                if atom.macro is not None:
+            # effective_conds = outer + NEUTRAL(parent + my local macros)
+            lo.effective_conds = outer[:]
+            seen = set()
+            for atom in parent.local_conds + lo.local_conds:
+                if atom.macro is not None and atom.macro not in seen:
                     lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
+                    seen.add(atom.macro)
 
             # create new layer by reversed parental local_conds and my local_conds
             reversed_parent = []
@@ -227,13 +235,17 @@ def propagate_effective_conditions(objs: List[LineObj]):
             continue
 
         elif lo.directive == DirectiveKind.ELSE:
-            # set effective_conds by neutralized parental local_conds
             parent_idx = lo.related_if
             parent = objs[parent_idx]
 
-            lo.effective_conds = []
+            # outer conditions (one level above the whole if-chain)
+            outer = cond_stack[-2].copy()
+
+            # effective_conds = outer + NEUTRAL(parent macros)
+            lo.effective_conds = outer[:]
             for atom in parent.local_conds:
-                lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
+                if atom.macro is not None:
+                    lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
 
             # create new layer by reversed parental local_conds
             reversed_parent = []
@@ -253,17 +265,20 @@ def propagate_effective_conditions(objs: List[LineObj]):
             parent_idx = lo.related_if
             parent = objs[parent_idx]
 
-            # set effective_conds by neutralized parental local_conds
-            lo.effective_conds = [
-                CondAtom(CondType.NEUTRAL, atom.macro)
-                for atom in parent.local_conds
-            ]
+            # outer conditions (one level above the whole if-chain)
+            outer = cond_stack[-2].copy() if len(cond_stack) >= 2 else []
+
+            # effective_conds = outer + NEUTRAL(parent macros)
+            lo.effective_conds = outer[:]
+            for atom in parent.local_conds:
+                if atom.macro is not None:
+                    lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
 
             cond_stack.pop()
             continue
 
         else:
-            lo.effective_conds = cond_stack[-1][:]
+            lo.effective_conds = cond_stack[-1].copy()
 
 def eval_effective_conds(effective_conds, defined_set, undefined_set):
 
@@ -294,8 +309,53 @@ def eval_effective_conds(effective_conds, defined_set, undefined_set):
 
     return True
 
+def postprocess_repair_structure(objs: List[LineObj], removed: set):
+    """
+    Repair broken #if/#elif/#else/#endif structures after filtering.
+    If the parent #if was removed but an #elif or #else remains,
+    convert them into standalone #ifdef/#ifndef blocks.
+    """
+
+    new_lines = []
+    for idx, lo in enumerate(objs):
+
+        if idx in removed:
+            continue
+
+        # If this is an ELIF whose parent was removed
+        if lo.directive == DirectiveKind.ELIF:
+            parent = lo.related_if
+            if parent in removed:
+                # Convert to standalone #ifdef / #ifndef
+                conds = lo.local_conds
+                if len(conds) == 1 and conds[0].kind == CondType.DEFINE:
+                    macro = conds[0].macro
+                    new_lines.append(f"#ifdef {macro}")
+                    continue
+                elif len(conds) == 1 and conds[0].kind == CondType.UNDEF:
+                    macro = conds[0].macro
+                    new_lines.append(f"#ifndef {macro}")
+                    continue
+                else:
+                    new_lines.append("#if /* complex */")
+                    continue
+
+        # If this is an ELSE whose parent was removed
+        if lo.directive == DirectiveKind.ELSE:
+            parent = lo.related_if
+            if parent in removed:
+                new_lines.append("#else")
+                continue
+
+        # ENDIF always stays
+        new_lines.append(lo.text)
+
+    return new_lines
+
 def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks):
     idx_to_remove = set()
+
+    # First pass: evaluate conditions
     for idx, lo in enumerate(objs):
         if not eval_effective_conds(lo.effective_conds, defined_set, undefined_set):
             idx_to_remove.add(idx)
@@ -305,14 +365,16 @@ def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks):
             if blk.begin_libc < idx < blk.end_libc:
                 blk.is_empty = False
 
+    # Remove empty Apple Libc blocks
     for blk in apple_libc_blocks:
         if blk.is_empty:
             idx_to_remove.add(blk.begin_libc)
             idx_to_remove.add(blk.end_libc)
 
-    out = [lo.text for idx, lo in enumerate(objs) if idx not in idx_to_remove]
+    # --- NEW: repair structure ---
+    repaired = postprocess_repair_structure(objs, idx_to_remove)
 
-    return out
+    return repaired
 
 def detect_header_guard(objs, debug = False):
     if debug:
