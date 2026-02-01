@@ -501,11 +501,12 @@ def main():
     if fh_out != sys.stdout:
         print(f"# write {path_out}", file = sys.stderr)
 
-    path_patch, fh_patch = open_fh_to_write( not(args.no_mkdir), args.dest_dir,
-                                             args.patch_output if args.patch_output else args.o,
-                                             None if args.patch_output else args.patch_suffix )
-    if fh_patch != sys.stdout:
-        print(f"# write {path_patch}", file = sys.stderr)
+    if args.patch:
+        path_patch, fh_patch = open_fh_to_write( not(args.no_mkdir), args.dest_dir,
+                                                 args.patch_output if args.patch_output else args.o,
+                                                 None if args.patch_output else args.patch_suffix )
+        if fh_patch != sys.stdout:
+            print(f"# write {path_patch}", file = sys.stderr)
 
     lines = fh_in.read().splitlines()
     apple_libc_blocks = collect_apple_libc_blocks(lines)
