@@ -79,6 +79,19 @@ class LineObj:
     def is_directive_endif(self):
         return self.directive == DirectiveKind.ENDIF
 
+    def negated_conds(self):
+        return [ atom.negated()
+                 for atom in self.local_conds ]
+
+    def neutralized_conds(self):
+        return [ atom.neutralized()
+                 for atom in self.local_conds ]
+
+    def neutralized_macro_conds(self):
+        return [ atom.neutralized()
+                 for atom in self.local_conds
+                 if atom.has_macro() ]
+
 @dataclass
 class AppleLibcBlock:
     begin_libc: Optional[int]
