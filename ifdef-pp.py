@@ -129,8 +129,7 @@ def parse_lines(lines):
             parent = objs[lo.related_if]
 
             # negate the parental conditions
-            for atom in parent.local_conds:
-                lo.local_conds.append(atom.negated())
+            lo.local_conds.extend(atom.negated() for atom in parent.local_conds)
 
             # append D:X for "defined(X)"
             macro = m.group(1)
@@ -146,8 +145,7 @@ def parse_lines(lines):
             parent = objs[lo.related_if]
 
             # negate the parental conditions
-            for atom in parent.local_conds:
-                lo.local_conds.append(atom.negated())
+            lo.local_conds.extend(atom.negated() for atom in parent.local_conds)
 
             # append U:X for "!defined(X)"
             macro = m.group(1)
@@ -169,8 +167,7 @@ def parse_lines(lines):
             lo.related_if = if_stack[-1]
 
             parent = objs[lo.related_if]
-            for atom in parent.local_conds:
-                lo.local_conds.append(atom.negated())
+            lo.local_conds.extent(atom.negated() for atom in parent.local_conds)
 
         # #endif ( NEUTRAL )
         elif regex_endif.match(line):
@@ -182,8 +179,7 @@ def parse_lines(lines):
             lo.related_if = related
 
             parent = objs[related]
-            for atom in parent.local_conds:
-                lo.local_conds.append(atom.neutralized())
+            lo.local_conds.extend(atom.neutralized() for atom in parent.local_conds)
 
         # #define, #undef, #include, #pragma, #error, #line, etc are marked but not parsed.
         elif regex_misc.match(line):
@@ -211,8 +207,7 @@ def propagate_effective_conditions(objs: List[LineObj]):
         if lo.is_directive_ifdef() or lo.is_directive_ifndef():
             # effective_conds = outer conditions + neutralized local conds
             lo.effective_conds = cond_stack[-1].copy()
-            for atom in lo.local_conds:
-                lo.effective_conds.append(atom.neutralized())
+            lo.effective_conds.extend(atom.neutralized() for atom in lo.local_conds)
 
             # push new layer
             new_layer = cond_stack[-1] + lo.local_conds
