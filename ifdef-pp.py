@@ -488,6 +488,7 @@ def open_fh_to_write(do_mkdir, str_dest_dir, str_path, file_suffix):
         pth.parent.mkdir( parents = True, exist_ok = True )
 
     fh = open( pth, "w" )
+    print(f"# write {pth}", file = sys.stderr)
     return ( str(pth), fh )
 
 def collect_apple_libc_blocks(lines):
@@ -559,16 +560,13 @@ def main():
     if fh_in is None:
         fh_in = sys.stdin
 
-    path_out, fh_out = open_fh_to_write( not(args.no_mkdir), args.dest_dir, args.o, None )
-    if fh_out != sys.stdout:
-        print(f"# write {path_out}", file = sys.stderr)
 
     if args.patch:
         path_patch, fh_patch = open_fh_to_write( not(args.no_mkdir), args.dest_dir,
                                                  args.patch_output if args.patch_output else args.o,
                                                  None if args.patch_output else args.patch_suffix )
-        if fh_patch != sys.stdout:
-            print(f"# write {path_patch}", file = sys.stderr)
+    else:
+        path_out, fh_out = open_fh_to_write( not(args.no_mkdir), args.dest_dir, args.o, None )
 
     lines = fh_in.read().splitlines()
     apple_libc_blocks = collect_apple_libc_blocks(lines)
@@ -597,7 +595,7 @@ def main():
         for line in difflib.unified_diff( source_original,
                                           source_processed,
                                           fromfile = path_in,
-                                          tofile = args.o,
+                                          tofile = path_in if args.o is None else args.o,
                                           lineterm = "" ):
             print(line, file = fh_patch)
         if fh_patch != sys.stdout:
