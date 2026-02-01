@@ -337,14 +337,11 @@ def postprocess_repair_structure(objs: List[LineObj], removed: set):
             parent = lo.related_if
             if parent in removed:
                 # Convert to standalone #ifdef / #ifndef
-                conds = lo.local_conds
-                if len(conds) == 1 and conds[0].is_define():
-                    macro = conds[0].macro
-                    new_lines.append(f"#ifdef {macro}")
+                if lo.is_single_define():
+                    new_lines.append(f"#ifdef {lo.local_conds[0].macro}")
                     continue
-                elif len(conds) == 1 and conds[0].is_undef():
-                    macro = conds[0].macro
-                    new_lines.append(f"#ifndef {macro}")
+                elif lo.is_single_undef():
+                    new_lines.append(f"#ifndef {lo.local_conds[0].macro}")
                     continue
                 else:
                     new_lines.append("#if /* complex */")
