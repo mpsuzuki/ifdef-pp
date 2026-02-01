@@ -31,6 +31,15 @@ class CondAtom:
     kind: CondType
     macro: Optional[str]  # None for COMPLEX or NEUTRAL with "*"
 
+    def is_define(self):
+        return self.kind == CondType.DEFINE
+    def is_undef(self):
+        return self.kind == CondType.UNDEF
+    def is_complex(self):
+        return self.kind == CondType.COMPLEX
+    def is_neutral(self):
+        return self.kind == CondType.NEUTRAL
+
 @dataclass
 class LineObj:
     text: str
@@ -38,6 +47,24 @@ class LineObj:
     related_if: Optional[int] = None
     local_conds: List[CondAtom] = field(default_factory=list)
     effective_conds: List[CondAtom] = field(default_factory=list)
+    def is_directive_none(self):
+        return self.directive == DirectiveKind.NONE
+    def is_directive_disabled(self):
+        return self.directive == DirectiveKind.DISABLED
+    def is_directive_pp_misc(self):
+        return self.directive == DirectiveKind.PP_MISC
+    def is_directive_if(self):
+        return self.directive == DirectiveKind.IF
+    def is_directive_ifdef(self):
+        return self.directive == DirectiveKind.IFDEF
+    def is_directive_ifndef(self):
+        return self.directive == DirectiveKind.IFNDEF
+    def is_directive_elif(self):
+        return self.directive == DirectiveKind.ELIF
+    def is_directive_else(self):
+        return self.directive == DirectiveKind.ELSE
+    def is_directive_endif(self):
+        return self.directive == DirectiveKind.ENDIF
 
 @dataclass
 class AppleLibcBlock:
@@ -93,9 +120,9 @@ def parse_lines(lines):
 
             # negate the parental conditions
             for atom in parent.local_conds:
-                if atom.kind == CondType.DEFINE:
+                if atom.is_define():
                     lo.local_conds.append(CondAtom(CondType.UNDEF, atom.macro))
-                elif atom.kind == CondType.UNDEF:
+                elif atom.is_undef():
                     lo.local_conds.append(CondAtom(CondType.DEFINE, atom.macro))
                 else:
                     lo.local_conds.append(CondAtom(CondType.COMPLEX, None))
@@ -115,9 +142,9 @@ def parse_lines(lines):
 
             # negate the parental conditions
             for atom in parent.local_conds:
-                if atom.kind == CondType.DEFINE:
+                if atom.is_define():
                     lo.local_conds.append(CondAtom(CondType.UNDEF, atom.macro))
-                elif atom.kind == CondType.UNDEF:
+                elif atom.is_undef():
                     lo.local_conds.append(CondAtom(CondType.DEFINE, atom.macro))
                 else:
                     lo.local_conds.append(CondAtom(CondType.COMPLEX, None))
@@ -143,9 +170,9 @@ def parse_lines(lines):
 
             parent = objs[lo.related_if]
             for atom in parent.local_conds:
-                if atom.kind == CondType.DEFINE:
+                if atom.is_define():
                     lo.local_conds.append(CondAtom(CondType.UNDEF, atom.macro))
-                elif atom.kind == CondType.UNDEF:
+                elif atom.is_undef():
                     lo.local_conds.append(CondAtom(CondType.DEFINE, atom.macro))
                 else:
                     lo.local_conds.append(CondAtom(CondType.COMPLEX, None))
@@ -188,7 +215,7 @@ def propagate_effective_conditions(objs: List[LineObj]):
 
     for idx, lo in enumerate(objs):
 
-        if lo.directive in (DirectiveKind.IFDEF, DirectiveKind.IFNDEF):
+        if lo.is_directive_ifdef() or lo.is_directive_ifndef():
             # effective_conds = outer conditions + neutralized local conds
             lo.effective_conds = cond_stack[-1].copy()
             for atom in lo.local_conds:
@@ -199,13 +226,13 @@ def propagate_effective_conditions(objs: List[LineObj]):
             cond_stack.append(new_layer)
             continue
 
-        elif lo.directive == DirectiveKind.IF:
+        elif lo.is_directive_if():
             lo.effective_conds = cond_stack[-1].copy()
             new_layer = cond_stack[-1] + lo.local_conds
             cond_stack.append(new_layer)
             continue
 
-        elif lo.directive == DirectiveKind.ELIF:
+        elif lo.is_directive_elif():
             parent_idx = lo.related_if
             parent = objs[parent_idx]
 
@@ -223,9 +250,9 @@ def propagate_effective_conditions(objs: List[LineObj]):
             # create new layer by reversed parental local_conds and my local_conds
             reversed_parent = []
             for atom in parent.local_conds:
-                if atom.kind == CondType.DEFINE:
+                if atom.is_define():
                     reversed_parent.append(CondAtom(CondType.UNDEF, atom.macro))
-                elif atom.kind == CondType.UNDEF:
+                elif atom.is_undef():
                     reversed_parent.append(CondAtom(CondType.DEFINE, atom.macro))
                 else:
                     reversed_parent.append(CondAtom(CondType.COMPLEX, None))
@@ -234,7 +261,7 @@ def propagate_effective_conditions(objs: List[LineObj]):
             cond_stack[-1] = new_layer
             continue
 
-        elif lo.directive == DirectiveKind.ELSE:
+        elif lo.is_directive_else():
             parent_idx = lo.related_if
             parent = objs[parent_idx]
 
@@ -250,9 +277,9 @@ def propagate_effective_conditions(objs: List[LineObj]):
             # create new layer by reversed parental local_conds
             reversed_parent = []
             for atom in parent.local_conds:
-                if atom.kind == CondType.DEFINE:
+                if atom.is_define():
                     reversed_parent.append(CondAtom(CondType.UNDEF, atom.macro))
-                elif atom.kind == CondType.UNDEF:
+                elif atom.is_undef():
                     reversed_parent.append(CondAtom(CondType.DEFINE, atom.macro))
                 else:
                     reversed_parent.append(CondAtom(CondType.COMPLEX, None))
@@ -261,7 +288,7 @@ def propagate_effective_conditions(objs: List[LineObj]):
             cond_stack[-1] = new_layer
             continue
 
-        elif lo.directive == DirectiveKind.ENDIF:
+        elif lo.is_directive_endif():
             parent_idx = lo.related_if
             parent = objs[parent_idx]
 
@@ -285,22 +312,22 @@ def eval_effective_conds(effective_conds, defined_set, undefined_set):
     for atom in effective_conds:
         macro = atom.macro
 
-        if atom.kind == CondType.COMPLEX:
+        if atom.is_complex():
             continue
 
-        if atom.kind == CondType.NEUTRAL:
+        if atom.is_neutral():
             if macro in defined_set or macro in undefined_set:
                 return False
             continue
 
-        if atom.kind == CondType.DEFINE:
+        if atom.is_define():
             if macro in defined_set:
                 continue
             if macro in undefined_set:
                 return False
             continue
 
-        if atom.kind == CondType.UNDEF:
+        if atom.is_undef():
             if macro in defined_set:
                 return False
             if macro in undefined_set:
@@ -323,16 +350,16 @@ def postprocess_repair_structure(objs: List[LineObj], removed: set):
             continue
 
         # If this is an ELIF whose parent was removed
-        if lo.directive == DirectiveKind.ELIF:
+        if lo.is_directive_elif():
             parent = lo.related_if
             if parent in removed:
                 # Convert to standalone #ifdef / #ifndef
                 conds = lo.local_conds
-                if len(conds) == 1 and conds[0].kind == CondType.DEFINE:
+                if len(conds) == 1 and conds[0].is_define():
                     macro = conds[0].macro
                     new_lines.append(f"#ifdef {macro}")
                     continue
-                elif len(conds) == 1 and conds[0].kind == CondType.UNDEF:
+                elif len(conds) == 1 and conds[0].is_undef():
                     macro = conds[0].macro
                     new_lines.append(f"#ifndef {macro}")
                     continue
@@ -341,7 +368,7 @@ def postprocess_repair_structure(objs: List[LineObj], removed: set):
                     continue
 
         # If this is an ELSE whose parent was removed
-        if lo.directive == DirectiveKind.ELSE:
+        if lo.is_directive_else():
             parent = lo.related_if
             if parent in removed:
                 new_lines.append("#else")
@@ -383,7 +410,7 @@ def detect_header_guard(objs, debug = False):
     # lookup last endif
     endif_idx = None
     for i in reversed(range(len(objs))):
-        if objs[i].directive == DirectiveKind.ENDIF:
+        if objs[i].is_directive_endif():
             endif_idx = i
             break
 
