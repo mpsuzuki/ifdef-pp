@@ -228,18 +228,15 @@ def propagate_effective_conditions(objs: List[LineObj]):
 
         if lo.is_directive_ifdef() or lo.is_directive_ifndef():
             # effective_conds = outer conditions + neutralized local conds
-            lo.effective_conds = cond_stack[-1].copy()
-            lo.effective_conds.extend(atom.neutralized() for atom in lo.local_conds)
+            lo.effective_conds = cond_stack[-1] + lo.neutralized_conds()
 
             # push new layer
-            new_layer = cond_stack[-1] + lo.local_conds
-            cond_stack.append(new_layer)
+            cond_stack.append(cond_stack[-1] + lo.local_conds)
             continue
 
         elif lo.is_directive_if():
             lo.effective_conds = cond_stack[-1].copy()
-            new_layer = cond_stack[-1] + lo.local_conds
-            cond_stack.append(new_layer)
+            cond_stack.append(cond_stack[-1] + lo.local_conds)
             continue
 
         elif lo.is_directive_elif():
@@ -252,16 +249,13 @@ def propagate_effective_conditions(objs: List[LineObj]):
             # effective_conds = outer + NEUTRAL(parent + my local macros)
             lo.effective_conds = outer[:]
             seen = set()
-            for atom in parent.local_conds + lo.local_conds:
-                if atom.macro is not None and atom.macro not in seen:
-                    lo.effective_conds.append(atom.neutralized())
+            for atom in parent.neutralized_macro_conds() + lo.neutralized_macro_conds():
+                if atom.macro not in seen:
+                    lo.effective_conds.append(atom)
                     seen.add(atom.macro)
 
             # create new layer by negated parental local_conds and my local_conds
-            negated_parent = [atom.negated() for atom in parent.local_conds]
-
-            new_layer = cond_stack[-2] + negated_parent + lo.local_conds
-            cond_stack[-1] = new_layer
+            cond_stack[-1] = cond_stack[-2] + parent.negated_conds() + lo.local_conds
             continue
 
         elif lo.is_directive_else():
@@ -273,15 +267,10 @@ def propagate_effective_conditions(objs: List[LineObj]):
 
             # effective_conds = outer + NEUTRAL(parent macros)
             lo.effective_conds = outer[:]
-            for atom in parent.local_conds:
-                if atom.macro is not None:
-                    lo.effective_conds.append(atom.neutralized())
+            lo.effective_conds.extend(parent.neutralized_macro_conds())
 
             # create new layer by negated parental local_conds
-            negated_parent = [atom.negated() for atom in parent.local_conds]
-
-            new_layer = cond_stack[-2] + negated_parent
-            cond_stack[-1] = new_layer
+            cond_stack[-1] = cond_stack[-2] + parent.negated_conds()
             continue
 
         elif lo.is_directive_endif():
