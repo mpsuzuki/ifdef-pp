@@ -151,7 +151,7 @@ def parse_lines(lines):
             parent = objs[lo.related_if]
 
             # negate the parental conditions
-            lo.local_conds.extend(atom.negated() for atom in parent.local_conds)
+            lo.local_conds.extend(parent.negated_conds())
 
             # append D:X for "defined(X)"
             macro = m.group(1)
@@ -167,7 +167,7 @@ def parse_lines(lines):
             parent = objs[lo.related_if]
 
             # negate the parental conditions
-            lo.local_conds.extend(atom.negated() for atom in parent.local_conds)
+            lo.local_conds.extend(parent.negated_conds())
 
             # append U:X for "!defined(X)"
             macro = m.group(1)
@@ -189,7 +189,7 @@ def parse_lines(lines):
             lo.related_if = if_stack[-1]
 
             parent = objs[lo.related_if]
-            lo.local_conds.extent(atom.negated() for atom in parent.local_conds)
+            lo.local_conds.extend(parent.negated_conds())
 
         # #endif ( NEUTRAL )
         elif regex_endif.match(line):
@@ -201,7 +201,7 @@ def parse_lines(lines):
             lo.related_if = related
 
             parent = objs[related]
-            lo.local_conds.extend(atom.neutralized() for atom in parent.local_conds)
+            lo.local_conds.extend(parent.neutralized_conds())
 
         # #define, #undef, #include, #pragma, #error, #line, etc are marked but not parsed.
         elif regex_misc.match(line):
@@ -293,9 +293,7 @@ def propagate_effective_conditions(objs: List[LineObj]):
 
             # effective_conds = outer + NEUTRAL(parent macros)
             lo.effective_conds = outer[:]
-            for atom in parent.local_conds:
-                if atom.macro is not None:
-                    lo.effective_conds.append(atom.neutralized())
+            lo.effective_conds.extend(parent.neutralized_macro_conds())
 
             cond_stack.pop()
             continue
