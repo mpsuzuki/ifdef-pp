@@ -39,6 +39,12 @@ class CondAtom:
         return self.kind == CondType.COMPLEX
     def is_neutral(self):
         return self.kind == CondType.NEUTRAL
+    def negated(self, keep_macro = False):
+        if self.is_define():
+            return CondAtom(CondType.UNDEF, self.macro)
+        if self.is_undef():
+            return CondAtom(CondType.DEFINE, self.macro)
+        return CondAtom(CondType.NEUTRAL, self.macro if keep_macro else None)
 
 @dataclass
 class LineObj:
@@ -120,12 +126,7 @@ def parse_lines(lines):
 
             # negate the parental conditions
             for atom in parent.local_conds:
-                if atom.is_define():
-                    lo.local_conds.append(CondAtom(CondType.UNDEF, atom.macro))
-                elif atom.is_undef():
-                    lo.local_conds.append(CondAtom(CondType.DEFINE, atom.macro))
-                else:
-                    lo.local_conds.append(CondAtom(CondType.COMPLEX, None))
+                lo.local_conds.append(atom.negated())
 
             # append D:X for "defined(X)"
             macro = m.group(1)
@@ -142,12 +143,7 @@ def parse_lines(lines):
 
             # negate the parental conditions
             for atom in parent.local_conds:
-                if atom.is_define():
-                    lo.local_conds.append(CondAtom(CondType.UNDEF, atom.macro))
-                elif atom.is_undef():
-                    lo.local_conds.append(CondAtom(CondType.DEFINE, atom.macro))
-                else:
-                    lo.local_conds.append(CondAtom(CondType.COMPLEX, None))
+                lo.local_conds.append(atom.negated())
 
             # append U:X for "!defined(X)"
             macro = m.group(1)
@@ -170,12 +166,7 @@ def parse_lines(lines):
 
             parent = objs[lo.related_if]
             for atom in parent.local_conds:
-                if atom.is_define():
-                    lo.local_conds.append(CondAtom(CondType.UNDEF, atom.macro))
-                elif atom.is_undef():
-                    lo.local_conds.append(CondAtom(CondType.DEFINE, atom.macro))
-                else:
-                    lo.local_conds.append(CondAtom(CondType.COMPLEX, None))
+                lo.local_conds.append(atom.negated())
 
         # #endif ( NEUTRAL )
         elif regex_endif.match(line):
@@ -248,14 +239,7 @@ def propagate_effective_conditions(objs: List[LineObj]):
                     seen.add(atom.macro)
 
             # create new layer by negated parental local_conds and my local_conds
-            negated_parent = []
-            for atom in parent.local_conds:
-                if atom.is_define():
-                    negated_parent.append(CondAtom(CondType.UNDEF, atom.macro))
-                elif atom.is_undef():
-                    negated_parent.append(CondAtom(CondType.DEFINE, atom.macro))
-                else:
-                    negated_parent.append(CondAtom(CondType.COMPLEX, None))
+            negated_parent = [atom.negated() for atom in parent.local_conds]
 
             new_layer = cond_stack[-2] + negated_parent + lo.local_conds
             cond_stack[-1] = new_layer
@@ -275,14 +259,7 @@ def propagate_effective_conditions(objs: List[LineObj]):
                     lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
 
             # create new layer by negated parental local_conds
-            negated_parent = []
-            for atom in parent.local_conds:
-                if atom.is_define():
-                    negated_parent.append(CondAtom(CondType.UNDEF, atom.macro))
-                elif atom.is_undef():
-                    negated_parent.append(CondAtom(CondType.DEFINE, atom.macro))
-                else:
-                    negated_parent.append(CondAtom(CondType.COMPLEX, None))
+            negated_parent = [atom.negated() for atom in parent.local_conds]
 
             new_layer = cond_stack[-2] + negated_parent
             cond_stack[-1] = new_layer
