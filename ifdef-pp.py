@@ -79,6 +79,12 @@ class LineObj:
     def is_directive_endif(self):
         return self.directive == DirectiveKind.ENDIF
 
+    def is_single_define(self):
+        return len(self.local_conds) == 1 and self.local_conds[0].is_define()
+
+    def is_single_undef(self):
+        return len(self.local_conds) == 1 and self.local_conds[0].is_undef()
+
     def negated_conds(self):
         return [ atom.negated()
                  for atom in self.local_conds ]
