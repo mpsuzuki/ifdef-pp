@@ -39,12 +39,16 @@ class CondAtom:
         return self.kind == CondType.COMPLEX
     def is_neutral(self):
         return self.kind == CondType.NEUTRAL
+
     def negated(self, keep_macro = False):
         if self.is_define():
             return CondAtom(CondType.UNDEF, self.macro)
         if self.is_undef():
             return CondAtom(CondType.DEFINE, self.macro)
         return CondAtom(CondType.NEUTRAL, self.macro if keep_macro else None)
+
+    def neutralized(self):
+        return CondAtom(CondType.NEUTRAL, self.macro)
 
 @dataclass
 class LineObj:
@@ -179,9 +183,7 @@ def parse_lines(lines):
 
             parent = objs[related]
             for atom in parent.local_conds:
-                lo.local_conds.append(
-                    CondAtom(CondType.NEUTRAL, atom.macro)
-                )
+                lo.local_conds.append(atom.neutralized())
 
         # #define, #undef, #include, #pragma, #error, #line, etc are marked but not parsed.
         elif regex_misc.match(line):
@@ -210,7 +212,7 @@ def propagate_effective_conditions(objs: List[LineObj]):
             # effective_conds = outer conditions + neutralized local conds
             lo.effective_conds = cond_stack[-1].copy()
             for atom in lo.local_conds:
-                lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
+                lo.effective_conds.append(atom.neutralized())
 
             # push new layer
             new_layer = cond_stack[-1] + lo.local_conds
@@ -235,7 +237,7 @@ def propagate_effective_conditions(objs: List[LineObj]):
             seen = set()
             for atom in parent.local_conds + lo.local_conds:
                 if atom.macro is not None and atom.macro not in seen:
-                    lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
+                    lo.effective_conds.append(atom.neutralized())
                     seen.add(atom.macro)
 
             # create new layer by negated parental local_conds and my local_conds
@@ -256,7 +258,7 @@ def propagate_effective_conditions(objs: List[LineObj]):
             lo.effective_conds = outer[:]
             for atom in parent.local_conds:
                 if atom.macro is not None:
-                    lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
+                    lo.effective_conds.append(atom.neutralized())
 
             # create new layer by negated parental local_conds
             negated_parent = [atom.negated() for atom in parent.local_conds]
@@ -276,7 +278,7 @@ def propagate_effective_conditions(objs: List[LineObj]):
             lo.effective_conds = outer[:]
             for atom in parent.local_conds:
                 if atom.macro is not None:
-                    lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
+                    lo.effective_conds.append(atom.neutralized())
 
             cond_stack.pop()
             continue
