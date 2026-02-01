@@ -40,6 +40,9 @@ class CondAtom:
     def is_neutral(self):
         return self.kind == CondType.NEUTRAL
 
+    def has_macro(self):
+        return self.macro is not None
+
     def negated(self, keep_macro = False):
         if self.is_define():
             return CondAtom(CondType.UNDEF, self.macro)
