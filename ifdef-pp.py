@@ -247,17 +247,17 @@ def propagate_effective_conditions(objs: List[LineObj]):
                     lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
                     seen.add(atom.macro)
 
-            # create new layer by reversed parental local_conds and my local_conds
-            reversed_parent = []
+            # create new layer by negated parental local_conds and my local_conds
+            negated_parent = []
             for atom in parent.local_conds:
                 if atom.is_define():
-                    reversed_parent.append(CondAtom(CondType.UNDEF, atom.macro))
+                    negated_parent.append(CondAtom(CondType.UNDEF, atom.macro))
                 elif atom.is_undef():
-                    reversed_parent.append(CondAtom(CondType.DEFINE, atom.macro))
+                    negated_parent.append(CondAtom(CondType.DEFINE, atom.macro))
                 else:
-                    reversed_parent.append(CondAtom(CondType.COMPLEX, None))
+                    negated_parent.append(CondAtom(CondType.COMPLEX, None))
 
-            new_layer = cond_stack[-2] + reversed_parent + lo.local_conds
+            new_layer = cond_stack[-2] + negated_parent + lo.local_conds
             cond_stack[-1] = new_layer
             continue
 
@@ -274,17 +274,17 @@ def propagate_effective_conditions(objs: List[LineObj]):
                 if atom.macro is not None:
                     lo.effective_conds.append(CondAtom(CondType.NEUTRAL, atom.macro))
 
-            # create new layer by reversed parental local_conds
-            reversed_parent = []
+            # create new layer by negated parental local_conds
+            negated_parent = []
             for atom in parent.local_conds:
                 if atom.is_define():
-                    reversed_parent.append(CondAtom(CondType.UNDEF, atom.macro))
+                    negated_parent.append(CondAtom(CondType.UNDEF, atom.macro))
                 elif atom.is_undef():
-                    reversed_parent.append(CondAtom(CondType.DEFINE, atom.macro))
+                    negated_parent.append(CondAtom(CondType.DEFINE, atom.macro))
                 else:
-                    reversed_parent.append(CondAtom(CondType.COMPLEX, None))
+                    negated_parent.append(CondAtom(CondType.COMPLEX, None))
 
-            new_layer = cond_stack[-2] + reversed_parent
+            new_layer = cond_stack[-2] + negated_parent
             cond_stack[-1] = new_layer
             continue
 
