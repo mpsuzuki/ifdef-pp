@@ -136,6 +136,7 @@ def parse_lines(lines):
 
     for idx, line in enumerate(lines):
         lo = LineObj(text=line)
+        objs.append(lo)
 
         # #ifdef
         if m := regex_ifdef.match(line):
@@ -144,6 +145,8 @@ def parse_lines(lines):
             lo.local_conds.append(CondAtom(CondType.DEFINE, macro))
             if_stack.append(idx)
 
+            continue
+
         # #ifndef
         elif m := regex_ifndef.match(line):
             lo.directive = DirectiveKind.IFNDEF
@@ -151,11 +154,15 @@ def parse_lines(lines):
             lo.local_conds.append(CondAtom(CondType.UNDEF, macro))
             if_stack.append(idx)
 
+            continue
+
         # #if (complex/composite condition)
         elif m := regex_if.match(line):
             lo.directive = DirectiveKind.IF
             lo.local_conds.append(CondAtom(CondType.COMPLEX, None))
             if_stack.append(idx)
+
+            continue
 
         # #elif defined(X)
         elif m := regex_elif_defined.match(line):
@@ -173,6 +180,8 @@ def parse_lines(lines):
             macro = m.group(1)
             lo.local_conds.append(CondAtom(CondType.DEFINE, macro))
 
+            continue
+
         # #elif !defined(X)
         elif m := regex_elif_not_defined.match(line):
             lo.directive = DirectiveKind.ELIF
@@ -189,6 +198,8 @@ def parse_lines(lines):
             macro = m.group(1)
             lo.local_conds.append(CondAtom(CondType.UNDEF, macro))
 
+            continue
+
         # #elif (complex)
         elif m := regex_elif.match(line):
             lo.directive = DirectiveKind.ELIF
@@ -196,6 +207,8 @@ def parse_lines(lines):
                 raise SyntaxError(f"unmatched #elif at line {idx+1}")
             lo.related_if = if_stack[-1]
             lo.local_conds.append(CondAtom(CondType.COMPLEX, None))
+
+            continue
 
         # #else (negate)
         elif regex_else.match(line):
@@ -206,6 +219,8 @@ def parse_lines(lines):
 
             parent = objs[lo.related_if]
             lo.local_conds.extend(parent.negated_conds())
+
+            continue
 
         # #endif ( NEUTRAL )
         elif regex_endif.match(line):
@@ -219,11 +234,12 @@ def parse_lines(lines):
             parent = objs[related]
             lo.local_conds.extend(parent.neutralized_conds())
 
+            continue
+
         # #define, #undef, #include, #pragma, #error, #line, etc are marked but not parsed.
         elif regex_misc.match(line):
             lo.directive = DirectiveKind.PP_MISC
-
-        objs.append(lo)
+            continue
 
     if if_stack:
         raise SyntaxError("unclosed #if block(s)")
