@@ -31,6 +31,22 @@ class CondAtom:
     kind: CondType
     macro: Optional[str]  # None for COMPLEX or NEUTRAL with "*"
 
+    @classmethod
+    def define(cls, macro):
+        return cls(CondType.DEFINE, macro)
+
+    @classmethod
+    def undef(cls, macro):
+        return cls(CondType.UNDEF, macro)
+
+    @classmethod
+    def complex(cls, macro = None):
+        return cls(CondType.COMPLEX, macro)
+
+    @classmethod
+    def neutral(cls, macro):
+        return cls(CondType.NEUTRAL, macro)
+
     def is_define(self):
         return self.kind == CondType.DEFINE
     def is_undef(self):
@@ -45,13 +61,13 @@ class CondAtom:
 
     def negated(self, keep_macro = False):
         if self.is_define():
-            return CondAtom(CondType.UNDEF, self.macro)
+            return CondAtom.undef(self.macro)
         if self.is_undef():
-            return CondAtom(CondType.DEFINE, self.macro)
-        return CondAtom(CondType.NEUTRAL, self.macro if keep_macro else None)
+            return CondAtom.define(self.macro)
+        return CondAtom.neutral(self.macro if keep_macro else None)
 
     def neutralized(self):
-        return CondAtom(CondType.NEUTRAL, self.macro)
+        return CondAtom.neutral(self.macro)
 
 @dataclass
 class LineObj:
