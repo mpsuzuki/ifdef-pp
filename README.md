@@ -8,7 +8,7 @@ the conditional directives `#ifdef`,
 `#else`, `#elif defined()`, `#elif !defined()`,
 and `#endif`.
 
-Taking a (sample)[/sample1.h] like:
+Taking a [sample](sample1.h) like:
 ```
 #ifdef A
 #ifdef B
