@@ -130,6 +130,18 @@ regex_elif   = re.compile(r'^\s*#\s*elif\b(.*)')
 regex_else   = re.compile(r'^\s*#\s*else\b')
 regex_endif  = re.compile(r'^\s*#\s*endif\b')
 
+def parent_obj(lo, objs):
+    parent_idx = lo.related_if
+    if parent_idx is None or parent_idx < 0 or len(objs) <= parent_idx:
+        return None
+    return objs[parent_idx]
+
+def resolve_parent_if(lo, if_stack, objs):
+    if not if_stack:
+        raise SyntaxError(f"unmatched '{lo.text}' at line {idx+1}")
+    lo.related_if = if_stack[-1]
+    return parent_obj(lo, objs)
+
 def parse_lines(lines):
     objs: List[LineObj] = []
     if_stack: List[int] = []
@@ -141,8 +153,10 @@ def parse_lines(lines):
         # #ifdef
         if m := regex_ifdef.match(line):
             lo.directive = DirectiveKind.IFDEF
+
             macro = m.group(1)
-            lo.local_conds.append(CondAtom(CondType.DEFINE, macro))
+            lo.local_conds = [CondAtom.define(macro)]
+
             if_stack.append(idx)
 
             continue
@@ -150,8 +164,10 @@ def parse_lines(lines):
         # #ifndef
         elif m := regex_ifndef.match(line):
             lo.directive = DirectiveKind.IFNDEF
+
             macro = m.group(1)
-            lo.local_conds.append(CondAtom(CondType.UNDEF, macro))
+            lo.local_conds = [CondAtom.undef(macro)]
+
             if_stack.append(idx)
 
             continue
@@ -159,7 +175,9 @@ def parse_lines(lines):
         # #if (complex/composite condition)
         elif m := regex_if.match(line):
             lo.directive = DirectiveKind.IF
-            lo.local_conds.append(CondAtom(CondType.COMPLEX, None))
+
+            lo.local_conds = [CondAtom.complex()]
+
             if_stack.append(idx)
 
             continue
@@ -167,73 +185,54 @@ def parse_lines(lines):
         # #elif defined(X)
         elif m := regex_elif_defined.match(line):
             lo.directive = DirectiveKind.ELIF
-            if not if_stack:
-                raise SyntaxError(f"unmatched #elif at line {idx+1}")
-            lo.related_if = if_stack[-1]
 
-            parent = objs[lo.related_if]
+            parent = resolve_parent_if(lo, if_stack, objs)
+            lo.local_conds = parent.negated_conds()
 
-            # negate the parental conditions
-            lo.local_conds.extend(parent.negated_conds())
-
-            # append D:X for "defined(X)"
             macro = m.group(1)
-            lo.local_conds.append(CondAtom(CondType.DEFINE, macro))
+            lo.local_conds.append(CondAtom.define(macro))
 
             continue
 
         # #elif !defined(X)
         elif m := regex_elif_not_defined.match(line):
             lo.directive = DirectiveKind.ELIF
-            if not if_stack:
-                raise SyntaxError(f"unmatched #elif at line {idx+1}")
-            lo.related_if = if_stack[-1]
 
-            parent = objs[lo.related_if]
+            parent = resolve_parent_if(lo, if_stack, objs)
+            lo.local_conds = parent.negated_conds()
 
-            # negate the parental conditions
-            lo.local_conds.extend(parent.negated_conds())
-
-            # append U:X for "!defined(X)"
             macro = m.group(1)
-            lo.local_conds.append(CondAtom(CondType.UNDEF, macro))
+            lo.local_conds.append(CondAtom.undef(macro))
 
             continue
 
         # #elif (complex)
         elif m := regex_elif.match(line):
             lo.directive = DirectiveKind.ELIF
-            if not if_stack:
-                raise SyntaxError(f"unmatched #elif at line {idx+1}")
-            lo.related_if = if_stack[-1]
-            lo.local_conds.append(CondAtom(CondType.COMPLEX, None))
+
+            # no need for resolved parent, but set lo.related_if
+            resolve_parent_if(lo, if_stack, objs)
+            lo.local_conds = [CondAtom.complex()]
 
             continue
 
         # #else (negate)
         elif regex_else.match(line):
             lo.directive = DirectiveKind.ELSE
-            if not if_stack:
-                raise SyntaxError(f"unmatched #else at line {idx+1}")
-            lo.related_if = if_stack[-1]
 
-            parent = objs[lo.related_if]
-            lo.local_conds.extend(parent.negated_conds())
+            parent = resolve_parent_if(lo, if_stack, objs)
+            lo.local_conds = parent.negated_conds()
 
             continue
 
         # #endif ( NEUTRAL )
         elif regex_endif.match(line):
             lo.directive = DirectiveKind.ENDIF
-            if not if_stack:
-                raise SyntaxError(f"unmatched #endif at line {idx+1}")
 
-            related = if_stack.pop()
-            lo.related_if = related
-
-            parent = objs[related]
+            parent = resolve_parent_if(lo, if_stack, objs)
             lo.local_conds.extend(parent.neutralized_conds())
 
+            if_stack.pop()
             continue
 
         # #define, #undef, #include, #pragma, #error, #line, etc are marked but not parsed.
