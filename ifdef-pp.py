@@ -245,6 +245,14 @@ def parse_lines(lines):
 
     return objs
 
+def merge_conds(conds_a, conds_b):
+    merged = []
+    seen = set()
+    for atom in conds_a + conds_b:
+        if atom.macro not in seen:
+            merged.append(atom)
+            seen.add(atom.macro)
+    return merged
 
 def propagate_effective_conditions(objs: List[LineObj]):
     """
@@ -256,70 +264,45 @@ def propagate_effective_conditions(objs: List[LineObj]):
     cond_stack: List[List[CondAtom]] = [[]]
 
     for idx, lo in enumerate(objs):
+        parent = parent_obj(lo, objs)
+        current_conds  = cond_stack[-1] if len(cond_stack) > 0 else []
+        surround_conds = cond_stack[-2] if len(cond_stack) > 1 else []
 
         if lo.is_directive_ifdef() or lo.is_directive_ifndef():
-            # effective_conds = outer conditions + neutralized local conds
-            lo.effective_conds = cond_stack[-1] + lo.neutralized_conds()
-
-            # push new layer
-            cond_stack.append(cond_stack[-1] + lo.local_conds)
+            lo.effective_conds = current_conds + lo.neutralized_conds()
+            cond_stack.append(current_conds + lo.local_conds)
             continue
 
         elif lo.is_directive_if():
-            lo.effective_conds = cond_stack[-1].copy()
-            cond_stack.append(cond_stack[-1] + lo.local_conds)
+            lo.effective_conds = current_conds.copy()
+            cond_stack.append(current_conds + lo.local_conds)
             continue
 
         elif lo.is_directive_elif():
-            parent_idx = lo.related_if
-            parent = objs[parent_idx]
+            lo.effective_conds = surround_conds.copy()
+            lo.effective_conds += merge_conds( parent.neutralized_macro_conds(),
+                                               lo.neutralized_macro_conds() )
 
-            # outer conditions (one level above the whole if-chain)
-            outer = cond_stack[-2].copy()
-
-            # effective_conds = outer + NEUTRAL(parent + my local macros)
-            lo.effective_conds = outer[:]
-            seen = set()
-            for atom in parent.neutralized_macro_conds() + lo.neutralized_macro_conds():
-                if atom.macro not in seen:
-                    lo.effective_conds.append(atom)
-                    seen.add(atom.macro)
-
-            # create new layer by negated parental local_conds and my local_conds
-            cond_stack[-1] = cond_stack[-2] + parent.negated_conds() + lo.local_conds
+            # replace current layer by negated parental local_conds and my local_conds
+            cond_stack.pop()
+            cond_stack.append( surround_conds + parent.negated_conds() + lo.local_conds )
             continue
 
         elif lo.is_directive_else():
-            parent_idx = lo.related_if
-            parent = objs[parent_idx]
+            lo.effective_conds = surround_conds + parent.neutralized_macro_conds()
 
-            # outer conditions (one level above the whole if-chain)
-            outer = cond_stack[-2].copy()
-
-            # effective_conds = outer + NEUTRAL(parent macros)
-            lo.effective_conds = outer[:]
-            lo.effective_conds.extend(parent.neutralized_macro_conds())
-
-            # create new layer by negated parental local_conds
-            cond_stack[-1] = cond_stack[-2] + parent.negated_conds()
+            cond_stack.pop()
+            cond_stack.append( surround_conds + parent.negated_conds() )
             continue
 
         elif lo.is_directive_endif():
-            parent_idx = lo.related_if
-            parent = objs[parent_idx]
-
-            # outer conditions (one level above the whole if-chain)
-            outer = cond_stack[-2].copy() if len(cond_stack) >= 2 else []
-
-            # effective_conds = outer + NEUTRAL(parent macros)
-            lo.effective_conds = outer[:]
-            lo.effective_conds.extend(parent.neutralized_macro_conds())
+            lo.effective_conds = surround_conds + parent.neutralized_macro_conds()
 
             cond_stack.pop()
             continue
 
         else:
-            lo.effective_conds = cond_stack[-1].copy()
+            lo.effective_conds = current_conds.copy()
 
 def eval_effective_conds(effective_conds, defined_set, undefined_set):
 
