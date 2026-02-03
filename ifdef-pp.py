@@ -287,7 +287,7 @@ def merge_conds(conds_a, conds_b):
             seen.add(atom.macro)
     return merged
 
-def propagate_effective_conditions(objs: List[LineObj]):
+def propagate_effective_conds(objs: List[LineObj]):
     """
     Propagate conditions downward.
     effective_conds = conditions required for THIS line to appear.
@@ -634,7 +634,7 @@ def main():
                 objs[idx].directive   = DirectiveKind.DISABLED
                 objs[idx].local_conds = []
 
-    propagate_effective_conditions(objs)
+    propagate_effective_conds(objs)
 
     if args.debug:
         for lo in objs:
