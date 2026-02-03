@@ -163,16 +163,6 @@ class AppleLibcBlock:
     end_libc: Optional[int]
     is_empty: bool = True
 
-regex_misc   = re.compile(r'^\s*#\s*([A-Za-z_]\w*)')
-regex_ifdef  = re.compile(r'^\s*#\s*ifdef\s+(\w+)\b')
-regex_ifndef = re.compile(r'^\s*#\s*ifndef\s+(\w+)\b')
-regex_if     = re.compile(r'^\s*#\s*if\b(.*)')
-regex_elif_defined     = re.compile(r'^\s*#\s*elif\s+defined\s*\(\s*(\w+)\s*\)')
-regex_elif_not_defined = re.compile(r'^\s*#\s*elif\s+!\s*defined\s*\(\s*(\w+)\s*\)')
-regex_elif   = re.compile(r'^\s*#\s*elif\b(.*)')
-regex_else   = re.compile(r'^\s*#\s*else\b')
-regex_endif  = re.compile(r'^\s*#\s*endif\b')
-
 def parent_obj(lo, objs):
     parent_idx = lo.related_if
     if parent_idx is None or parent_idx < 0 or len(objs) <= parent_idx:
