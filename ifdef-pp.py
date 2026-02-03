@@ -115,6 +115,7 @@ class LineObj:
     related_if: Optional[int] = None
     local_conds: List[CondAtom] = field(default_factory=list)
     effective_conds: List[CondAtom] = field(default_factory=list)
+
     def is_directive_none(self):
         return self.directive == DirectiveKind.NONE
     def is_directive_disabled(self):
