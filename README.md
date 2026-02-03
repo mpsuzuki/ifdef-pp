@@ -80,3 +80,8 @@ of headers, it would not be handled correctly.
 
 The macros which can be defined internally should be
 refused or warned if users try to set them externally.
+
+### Ignore quasi-directives in comments or string constants
+
+Currently, ifdef-pp.py cannot detect whether the pp directives
+appearing in the middle of the comments or string constants.
