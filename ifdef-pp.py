@@ -279,6 +279,35 @@ def parse_lines(lines):
 
     return objs
 
+def eval_effective_conds(effective_conds, defined_set, undefined_set):
+
+    for atom in effective_conds:
+        macro = atom.macro
+
+        if atom.is_complex():
+            continue
+
+        if atom.is_neutral():
+            if macro in defined_set or macro in undefined_set:
+                return False
+            continue
+
+        if atom.is_define():
+            if macro in defined_set:
+                continue
+            if macro in undefined_set:
+                return False
+            continue
+
+        if atom.is_undef():
+            if macro in defined_set:
+                return False
+            if macro in undefined_set:
+                continue
+            continue
+
+    return True
+
 def merge_conds(conds_a, conds_b):
     merged = []
     seen = set()
@@ -337,35 +366,6 @@ def propagate_effective_conds(objs: List[LineObj]):
 
         else:
             lo.effective_conds = current_conds.copy()
-
-def eval_effective_conds(effective_conds, defined_set, undefined_set):
-
-    for atom in effective_conds:
-        macro = atom.macro
-
-        if atom.is_complex():
-            continue
-
-        if atom.is_neutral():
-            if macro in defined_set or macro in undefined_set:
-                return False
-            continue
-
-        if atom.is_define():
-            if macro in defined_set:
-                continue
-            if macro in undefined_set:
-                return False
-            continue
-
-        if atom.is_undef():
-            if macro in defined_set:
-                return False
-            if macro in undefined_set:
-                continue
-            continue
-
-    return True
 
 def postprocess_repair_structure(objs: List[LineObj], removed: set):
     """
