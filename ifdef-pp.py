@@ -9,6 +9,18 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Optional, List
 
+regex_directive_prefix = re.compile(r'^\s*#\s*')
+regex_misc   = re.compile(r'^\s*#\s*([A-Za-z_]\w*)')
+regex_ifdef  = re.compile(r'^\s*#\s*ifdef\s+(\w+)\b')
+regex_ifndef = re.compile(r'^\s*#\s*ifndef\s+(\w+)\b')
+regex_if     = re.compile(r'^\s*#\s*if\b(.*)')
+regex_elif_defined     = re.compile(r'^\s*#\s*elif\s+defined\s*\(\s*(\w+)\s*\)')
+regex_elif_not_defined = re.compile(r'^\s*#\s*elif\s+!\s*defined\s*\(\s*(\w+)\s*\)')
+regex_elif   = re.compile(r'^\s*#\s*elif\b(.*)')
+regex_else   = re.compile(r'^\s*#\s*else\b')
+regex_endif  = re.compile(r'^\s*#\s*endif\b')
+
+
 class DirectiveKind(Enum):
     NONE     = auto()	# normal content, not preprocessor directive
     DISABLED = auto()	# preprocessor directive, known type, but disabled
@@ -113,6 +125,10 @@ class LineObj:
         return [ atom.neutralized()
                  for atom in self.local_conds
                  if atom.has_macro() ]
+
+    def directive_prefix(self):
+        m = regex_directive_prefix.match(self.text)
+        return m.group(0) if m else None
 
 @dataclass
 class AppleLibcBlock:
@@ -352,20 +368,20 @@ def postprocess_repair_structure(objs: List[LineObj], removed: set):
             if parent in removed:
                 # Convert to standalone #ifdef / #ifndef
                 if lo.is_single_define():
-                    new_lines.append(f"#ifdef {lo.local_conds[0].macro}")
+                    new_lines.append(f"{lo.directive_prefix()}ifdef {lo.local_conds[0].macro}")
                     continue
                 elif lo.is_single_undef():
-                    new_lines.append(f"#ifndef {lo.local_conds[0].macro}")
+                    new_lines.append(f"{lo.directive_prefix()}ifndef {lo.local_conds[0].macro}")
                     continue
                 else:
-                    new_lines.append("#if /* complex */")
+                    new_lines.append(f"{lo.directive_prefix()}if /* complex */")
                     continue
 
         # If this is an ELSE whose parent was removed
         if lo.is_directive_else():
             parent = lo.related_if
             if parent in removed:
-                new_lines.append("#else")
+                new_lines.append(f"{lo.directive_prefix()}else")
                 continue
 
         # ENDIF always stays
