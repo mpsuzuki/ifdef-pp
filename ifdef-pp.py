@@ -35,8 +35,9 @@ class DirectiveKind(Enum):
 class CondType(Enum):
     DEFINE  = "D"	# D:A (emit this line if A is defined or neutral)
     UNDEF   = "U"	# U:A (emit this line if A is undefined or neutral)
-    COMPLEX = "C"	# C:* (emit this line always - condition is complex)
     NEUTRAL = "N"	# N:A or N:* (emit this line if A is neutral)
+    COMPLEX = "X"	# X:* (emit this line always - condition is complex)
+    CONST_BOOLEAN = "B"	# B:* (emit this line always - condition is constant, true or false)
 
 @dataclass
 class CondAtom:
@@ -83,7 +84,29 @@ class CondAtom:
         return CondAtom.neutral(self.macro if keep_macro else None)
 
     def neutralized(self):
-        return CondAtom.neutral(self.macro)
+        if self.has_macro():
+            return CondAtom.neutral(self.macro)
+        else:
+            return CondAtom.complex()
+
+class TrueAtom(CondAtom):
+    def __init__(self):
+        self.kind = CondType.CONST_BOOLEAN
+        self.macro = None
+        self.value = True
+    def __repr__(self): return "<True>"
+    def negated(self): return FALSE_ATOM
+
+class FalseAtom(CondAtom):
+    def __init__(self):
+        self.kind = CondType.CONST_BOOLEAN
+        self.macro = None
+        self.value = False
+    def __repr__(self): return "<False>"
+    def negated(self): return TRUE_ATOM
+
+TRUE_ATOM  = TrueAtom()
+FALSE_ATOM = FalseAtom()
 
 @dataclass
 class LineObj:
