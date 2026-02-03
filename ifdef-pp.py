@@ -59,6 +59,10 @@ class CondAtom:
     def neutral(cls, macro):
         return cls(CondType.NEUTRAL, macro)
 
+    def __repr__(self):
+        macro = self.macro if self.has_macro() else "*"
+        return f"{self.kind.value}:{macro}"
+
     def is_define(self):
         return self.kind == CondType.DEFINE
     def is_undef(self):
@@ -621,8 +625,8 @@ def main():
 
     if args.debug:
         for lo in objs:
-            local = ",".join(f"{a.kind.value}:{a.macro or '*'}" for a in lo.local_conds)
-            eff   = ",".join(f"{a.kind.value}:{a.macro or '*'}" for a in lo.effective_conds)
+            local = ",".join(f"{repr(a)}" for a in lo.local_conds)
+            eff   = ",".join(f"{repr(a)}" for a in lo.effective_conds)
             print(f"[DEBUG] {local:20s} {eff:20s} {lo.text}")
 
     source_processed = filter_output_lines(objs, args.D, args.U, apple_libc_blocks)
