@@ -115,6 +115,7 @@ class LineObj:
     related_if: Optional[int] = None
     local_conds: List[CondAtom] = field(default_factory=list)
     effective_conds: List[CondAtom] = field(default_factory=list)
+    negated_sibling_conds: List[CondAtom] = field(default_factory=list)
 
     def is_directive_none(self):
         return self.directive == DirectiveKind.NONE
@@ -189,6 +190,15 @@ def merge_conds(conds_a, conds_b, collapse_conflicts = False):
             merged.append(atom)
     print("[DEBUG]   -> result:", merged)
     return merged
+
+def update_sibling_negations(parent, sibling): 
+    negs = [atom.negated() for atom in sibling.local_conds if atom.is_define()]
+    parent.negated_sibling_conds = merge_conds(
+        parent.negated_sibling_conds,
+        negs
+    )
+    print("[DEBUG] sibling local conds:", sibling.local_conds)
+    print("[DEBUG]   -> updated sibling negs:", parent.negated_sibling_conds)
 
 def parse_lines(lines):
     objs: List[LineObj] = []
