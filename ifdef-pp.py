@@ -176,6 +176,20 @@ def resolve_parent_if(lo, if_stack, objs):
     lo.related_if = if_stack[-1]
     return parent_obj(lo, objs)
 
+def merge_conds(conds_a, conds_b, collapse_conflicts = False):
+    print("[DEBUG] merge_conds() will merge", conds_a, end = "")
+    print(" +", conds_b)
+    merged = []
+    for atom in conds_a + conds_b:
+        if atom in merged:
+            continue
+        elif collapse_conflicts and atom.negated() in merged:
+            return [FALSE_ATOM]
+        else:
+            merged.append(atom)
+    print("[DEBUG]   -> result:", merged)
+    return merged
+
 def parse_lines(lines):
     objs: List[LineObj] = []
     if_stack: List[int] = []
@@ -278,15 +292,6 @@ def parse_lines(lines):
         raise SyntaxError("unclosed #if block(s)")
 
     return objs
-
-def merge_conds(conds_a, conds_b):
-    merged = []
-    seen = set()
-    for atom in conds_a + conds_b:
-        if atom.macro not in seen:
-            merged.append(atom)
-            seen.add(atom.macro)
-    return merged
 
 def propagate_effective_conds(objs: List[LineObj]):
     """
