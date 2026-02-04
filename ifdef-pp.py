@@ -249,6 +249,7 @@ def parse_lines(lines):
 
             macro = m.group(1)
             lo.local_conds.append(CondAtom.define(macro))
+            update_sibling_negations(parent, lo)
 
             continue
 
@@ -279,7 +280,7 @@ def parse_lines(lines):
             lo.directive = DirectiveKind.ELSE
 
             parent = resolve_parent_if(lo, if_stack, objs)
-            lo.local_conds = parent.negated_conds()
+            lo.local_conds = parent.negated_conds() + parent.negated_sibling_conds.copy()
 
             continue
 
@@ -338,10 +339,15 @@ def propagate_effective_conds(objs: List[LineObj]):
             continue
 
         elif lo.is_directive_else():
-            lo.effective_conds = surround_conds + parent.neutralized_macro_conds()
+            lo.effective_conds = ( surround_conds
+                                    + parent.negated_conds()
+                                    + parent.negated_sibling_conds )
 
             cond_stack.pop()
-            cond_stack.append( surround_conds + parent.negated_conds() )
+            cond_stack.append( surround_conds
+                                    + parent.negated_conds()
+                                    + parent.negated_sibling_conds )
+                                  
             continue
 
         elif lo.is_directive_endif():
