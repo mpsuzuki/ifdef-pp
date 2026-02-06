@@ -117,6 +117,10 @@ class TriValue(Enum):
     FALSE = auto()
     PENDING = auto()
 
+    def is_true(self): return self == TriValue.TRUE
+    def is_false(self): return self == TriValue.FALSE
+    def is_pending(self): return self == TriValue.PENDING
+
 # ------------------------------------------------------------
 # LineObj: represents one line of source
 # ------------------------------------------------------------
