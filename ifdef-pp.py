@@ -382,7 +382,7 @@ def eval_expr(expr, defined_set, undefined_set):
 # ------------------------------------------------------------
 
 def expr_to_if(expr):
-    if expr.kind == CondExprKind.ATOM:
+    if expr.kind.is_atom():
         atom = expr.atom
         if atom.kind == CondType.DEFINE:
             return f"defined({atom.macro})"
@@ -395,14 +395,14 @@ def expr_to_if(expr):
         if atom.kind == CondType.CONST_BOOLEAN:
             return "1" if atom is TRUE_ATOM else "0"
 
-    if expr.kind == CondExprKind.NOT:
-        return f"!({expr_to_if(expr.left)})"
+    if expr.kind.is_op_not():
+        return f"!({expr_to_if(expr.args[0])})"
 
-    if expr.kind == CondExprKind.AND:
-        return f"({expr_to_if(expr.left)} && {expr_to_if(expr.right)})"
+    if expr.kind.is_op_and():
+        return f"({expr_to_if(expr.args[0])} && {expr_to_if(expr.args[1])})"
 
-    if expr.kind == CondExprKind.OR:
-        return f"({expr_to_if(expr.left)} || {expr_to_if(expr.right)})"
+    if expr.kind.is_op_or():
+        return f"({expr_to_if(expr.args[0])} || {expr_to_if(expr.args[1])})"
 
     return "/* unknown */"
 
