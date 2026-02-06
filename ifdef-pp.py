@@ -150,6 +150,10 @@ class LineObj:
     def is_directive_none(self): return self.directive == DirectiveKind.NONE
     def is_directive_pp_misc(self): return self.directive == DirectiveKind.PP_MISC
 
+    def directive_prefix(self):
+        m = regex_directive_prefix.match(self.text)
+        return m.group(0) if m else None
+
 # ------------------------------------------------------------
 # IfFrame: used during propagation
 # ------------------------------------------------------------
@@ -163,6 +167,7 @@ class IfFrame:
 # Regex for parsing directives
 # ------------------------------------------------------------
 
+regex_directive_prefix = re.compile(r'^\s*#\s*')
 regex_defined = re.compile(r'defined\s*\(\s*(\w+)\s*\)')
 regex_not_defined = re.compile(r'\!\s*defined\s*\(\s*(\w+)\s*\)')
 regex_ifdef  = re.compile(r'^\s*#\s*ifdef\s+(\w+)\b')
@@ -602,13 +607,13 @@ def postprocess_repair_structure(objs, removed):
         if lo.is_directive_elif():
             parent = lo.related_if
             if parent in removed:
-                new_lines.append(f"#if {expr_to_if(lo.local_cond)}")
+                new_lines.append(f"{lo.directive_prefix()}if {expr_to_if(lo.local_cond)}")
                 continue
 
         if lo.is_directive_else():
             parent = lo.related_if
             if parent in removed:
-                new_lines.append("#else")
+                new_lines.append(f"{lo.directive_prefix()}else")
                 continue
 
         new_lines.append(lo.text)
