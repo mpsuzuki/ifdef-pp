@@ -592,7 +592,7 @@ def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[]):
     idx_to_remove |= collapse
 
     # Step 2: detect pending status of each if-chain
-    compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove)
+    if_chain_pending = compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove)
 
     # Step 2.5: remove FALSE branches entirely (only when -U is used)
     false_branch_remove = remove_false_branches(objs, defined_set, undefined_set)
