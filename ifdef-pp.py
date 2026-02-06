@@ -404,7 +404,8 @@ def expr_to_if(expr):
     if expr.kind.is_op_or():
         return f"({expr_to_if(expr.args[0])} || {expr_to_if(expr.args[1])})"
 
-    return "/* unknown */"
+    # here, assume expr.kind.is_unknown()
+    return f"/* {expr.args[0]} */"
 
 # ------------------------------------------------------------
 # filter_output_lines
