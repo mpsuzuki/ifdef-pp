@@ -457,6 +457,26 @@ def collapse_fully_resolved_if_chains(objs, defined_set, undefined_set):
 
     return to_remove
 
+def compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove):
+    if_chain_pending = {}
+
+    for idx, lo in enumerate(objs):
+        if idx in idx_to_remove:
+            continue
+
+        if lo.is_directive_if() or lo.is_directive_ifdef() or lo.is_directive_ifndef():
+            expr = lo.effective_cond or CondExpr.true()
+            v = eval_expr(expr, defined_set, undefined_set)
+            if_chain_pending[idx] = (v == TriValue.PENDING)
+
+        elif lo.is_directive_elif() or lo.is_directive_else():
+            parent_idx = lo.related_if
+            if parent_idx is not None and parent_idx in if_chain_pending:
+                expr = lo.effective_cond or CondExpr.true()
+                v = eval_expr(expr, defined_set, undefined_set)
+                if v == TriValue.PENDING:
+                    if_chain_pending[parent_idx] = True
+
 def remove_false_branches(objs, defined_set, undefined_set):
     """
     For each if-chain, remove entire branches whose *effective* condition
@@ -522,24 +542,7 @@ def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[]):
     idx_to_remove |= collapse
 
     # Step 2: detect pending status of each if-chain
-    if_chain_pending = {}
-
-    for idx, lo in enumerate(objs):
-        if idx in idx_to_remove:
-            continue
-
-        if lo.is_directive_if() or lo.is_directive_ifdef() or lo.is_directive_ifndef():
-            expr = lo.effective_cond or CondExpr.true()
-            v = eval_expr(expr, defined_set, undefined_set)
-            if_chain_pending[idx] = (v == TriValue.PENDING)
-
-        elif lo.is_directive_elif() or lo.is_directive_else():
-            parent_idx = lo.related_if
-            if parent_idx is not None and parent_idx in if_chain_pending:
-                expr = lo.effective_cond or CondExpr.true()
-                v = eval_expr(expr, defined_set, undefined_set)
-                if v == TriValue.PENDING:
-                    if_chain_pending[parent_idx] = True
+    compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove)
 
     # Step 2.5: remove FALSE branches entirely (only when -U is used)
     false_branch_remove = remove_false_branches(objs, defined_set, undefined_set)
