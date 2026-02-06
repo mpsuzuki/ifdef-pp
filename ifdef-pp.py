@@ -81,8 +81,7 @@ class CondExprKind(Enum):
 class CondExpr:
     kind: CondExprKind
     atom: Optional[CondAtom] = None
-    left: Optional["CondExpr"] = None
-    right: Optional["CondExpr"] = None
+    args: Optional[List["CondExpr"]] = None
 
     @classmethod
     def atom_expr(cls, atom):
@@ -97,16 +96,20 @@ class CondExpr:
         return cls.atom_expr(FALSE_ATOM)
 
     @classmethod
+    def Not(cls, a):
+        return cls(CondExprKind.NOT, args = [a])
+
+    @classmethod
     def And(cls, a, b):
-        return cls(CondExprKind.AND, left=a, right=b)
+        return cls(CondExprKind.AND, args = [a, b])
 
     @classmethod
     def Or(cls, a, b):
-        return cls(CondExprKind.OR, left=a, right=b)
+        return cls(CondExprKind.OR, args = [a, b])
 
     @classmethod
-    def Not(cls, a):
-        return cls(CondExprKind.NOT, left=a)
+    def Unknown(cls, text):
+        return cls(CondExprKind.UNKNOWN, args = [text])
 
 # ------------------------------------------------------------
 # TriValue: 3-valued logic
@@ -349,34 +352,30 @@ def eval_atom(atom, defined_set, undefined_set):
 # ------------------------------------------------------------
 
 def eval_expr(expr, defined_set, undefined_set):
-    if expr.kind == CondExprKind.ATOM:
+    if expr.kind.is_unknown(): return TriValue.PENDING
+    if expr.kind.is_atom():
         return eval_atom(expr.atom, defined_set, undefined_set)
 
-    if expr.kind == CondExprKind.NOT:
-        v = eval_expr(expr.left, defined_set, undefined_set)
-        if v == TriValue.TRUE: return TriValue.FALSE
-        if v == TriValue.FALSE: return TriValue.TRUE
+    vs = [
+        eval_expr(a, defined_set, undefined_set)
+        for a in expr.args
+    ]
+
+    if expr.kind.is_op_not():
+        if vs[0].is_true(): return TriValue.FALSE
+        if vs[0].is_false(): return TriValue.TRUE
         return TriValue.PENDING
 
-    if expr.kind == CondExprKind.AND:
-        v1 = eval_expr(expr.left, defined_set, undefined_set)
-        v2 = eval_expr(expr.right, defined_set, undefined_set)
-        if v1 == TriValue.FALSE or v2 == TriValue.FALSE:
-            return TriValue.FALSE
-        if v1 == TriValue.TRUE and v2 == TriValue.TRUE:
-            return TriValue.TRUE
+    if expr.kind.is_op_and():
+        if any(v.is_false() for v in vs): return TriValue.FALSE
+        if all(v.is_true() for v in vs): return TriValue.TRUE
         return TriValue.PENDING
 
-    if expr.kind == CondExprKind.OR:
-        v1 = eval_expr(expr.left, defined_set, undefined_set)
-        v2 = eval_expr(expr.right, defined_set, undefined_set)
-        if v1 == TriValue.TRUE or v2 == TriValue.TRUE:
-            return TriValue.TRUE
-        if v1 == TriValue.FALSE and v2 == TriValue.FALSE:
-            return TriValue.FALSE
+    if expr.kind.is_op_or():
+        if any(v.is_true() for v in vs): return TriValue.TRUE
+        if all(v.is_false() for v in vs): return TriValue.FALSE
         return TriValue.PENDING
 
-    return TriValue.PENDING
 
 # ------------------------------------------------------------
 # expr_to_if (minimal)
