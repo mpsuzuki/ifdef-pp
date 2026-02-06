@@ -66,9 +66,11 @@ FALSE_ATOM = FalseAtom()
 
 class CondExprKind(Enum):
     ATOM = auto()
+    UNKNOWN = auto()
+    NOT  = auto()
     AND  = auto()
     OR   = auto()
-    NOT  = auto()
+
 
 @dataclass
 class CondExpr:
