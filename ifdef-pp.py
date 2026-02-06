@@ -71,6 +71,11 @@ class CondExprKind(Enum):
     AND  = auto()
     OR   = auto()
 
+    def is_atom(self): return self == CondExprKind.ATOM
+    def is_unknown(self): return self == CondExprKind.UNKNOWN
+    def is_op_not(self): return self == CondExprKind.NOT
+    def is_op_and(self): return self == CondExprKind.AND
+    def is_op_or(self): return self == CondExprKind.OR
 
 @dataclass
 class CondExpr:
