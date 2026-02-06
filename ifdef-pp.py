@@ -163,6 +163,8 @@ class IfFrame:
 # Regex for parsing directives
 # ------------------------------------------------------------
 
+regex_defined = re.compile(r'defined\s*\(\s*(\w+)\s*\)')
+regex_not_defined = re.compile(r'\!\s*defined\s*\(\s*(\w+)\s*\)')
 regex_ifdef  = re.compile(r'^\s*#\s*ifdef\s+(\w+)\b')
 regex_ifndef = re.compile(r'^\s*#\s*ifndef\s+(\w+)\b')
 regex_if     = re.compile(r'^\s*#\s*if\b(.*)')
