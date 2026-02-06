@@ -528,27 +528,7 @@ def remove_false_branches(objs, defined_set, undefined_set):
 
     return to_remove
 
-def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[]):
-    if "--debug" in sys.argv:
-        print("===== OBJS DUMP =====")
-        for i, lo in enumerate(objs):
-            print(f"[{i:03}] {lo.text.rstrip()}   dir={lo.directive}   related_if={lo.related_if}")
-        print("======================")
-
-    idx_to_remove = set()
-
-    # Step 1: collapse fully resolved if-chains
-    collapse = collapse_fully_resolved_if_chains(objs, defined_set, undefined_set)
-    idx_to_remove |= collapse
-
-    # Step 2: detect pending status of each if-chain
-    compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove)
-
-    # Step 2.5: remove FALSE branches entirely (only when -U is used)
-    false_branch_remove = remove_false_branches(objs, defined_set, undefined_set)
-    idx_to_remove |= false_branch_remove
-
-    # Step 3: normal filtering
+def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, idx_to_remove):
     for idx, lo in enumerate(objs):
         if idx in idx_to_remove:
             continue
@@ -598,6 +578,28 @@ def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[]):
                 else:
                     idx_to_remove.add(idx)
                     continue
+def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[]):
+    if "--debug" in sys.argv:
+        print("===== OBJS DUMP =====")
+        for i, lo in enumerate(objs):
+            print(f"[{i:03}] {lo.text.rstrip()}   dir={lo.directive}   related_if={lo.related_if}")
+        print("======================")
+
+    idx_to_remove = set()
+
+    # Step 1: collapse fully resolved if-chains
+    collapse = collapse_fully_resolved_if_chains(objs, defined_set, undefined_set)
+    idx_to_remove |= collapse
+
+    # Step 2: detect pending status of each if-chain
+    compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove)
+
+    # Step 2.5: remove FALSE branches entirely (only when -U is used)
+    false_branch_remove = remove_false_branches(objs, defined_set, undefined_set)
+    idx_to_remove |= false_branch_remove
+
+    # Step 3: normal filtering
+    remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, idx_to_remove)
 
     return postprocess_repair_structure(objs, idx_to_remove)
 
