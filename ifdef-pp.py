@@ -123,7 +123,6 @@ class DirectiveKind(Enum):
     ELIF     = auto()
     ELSE     = auto()
     ENDIF    = auto()
-    DISABLED = auto()
 
 @dataclass
 class LineObj:
@@ -141,7 +140,6 @@ class LineObj:
     def is_directive_endif(self): return self.directive == DirectiveKind.ENDIF
     def is_directive_none(self): return self.directive == DirectiveKind.NONE
     def is_directive_pp_misc(self): return self.directive == DirectiveKind.PP_MISC
-    def is_directive_disabled(self): return self.directive == DirectiveKind.DISABLED
 
 # ------------------------------------------------------------
 # IfFrame: used during propagation
@@ -267,7 +265,7 @@ def propagate_effective_conds(objs):
 
     for lo in objs:
 
-        if lo.is_directive_none() or lo.is_directive_pp_misc() or lo.is_directive_disabled():
+        if lo.is_directive_none() or lo.is_directive_pp_misc():
             lo.effective_cond = current_effective
             continue
 
