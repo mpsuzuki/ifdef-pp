@@ -457,7 +457,7 @@ def collapse_fully_resolved_if_chains(objs, defined_set, undefined_set):
             v = eval_expr(expr, defined_set, undefined_set)
             results.append((b, v))
 
-        true_branches = [b for b, v in results if v == TriValue.TRUE]
+        true_branches = [b for b, v in results if v.is_true()]
         pending = any(v == TriValue.PENDING for _, v in results)
 
         if len(true_branches) == 1 and not pending:
@@ -550,7 +550,7 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, id
             continue
 
         # 2) Remove directive lines that are fully TRUE (except #endif)
-        if v == TriValue.TRUE and not parent_pending and (
+        if v.is_true() and not parent_pending and (
             lo.is_directive_if()
             or lo.is_directive_ifdef()
             or lo.is_directive_ifndef()
