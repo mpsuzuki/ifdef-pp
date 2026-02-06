@@ -3,7 +3,7 @@ import re
 import sys
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Optional, List
+from typing import Optional, List, Any
 
 # ------------------------------------------------------------
 # CondAtom: represents a single macro condition (pending)
@@ -81,7 +81,7 @@ class CondExprKind(Enum):
 class CondExpr:
     kind: CondExprKind
     atom: Optional[CondAtom] = None
-    args: Optional[List["CondExpr"]] = None
+    args: Optional[List[Any]] = None
 
     @classmethod
     def atom_expr(cls, atom):
