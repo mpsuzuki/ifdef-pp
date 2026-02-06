@@ -400,59 +400,90 @@ def expr_to_if(expr):
 # filter_output_lines
 # ------------------------------------------------------------
 
-def collapse_fully_resolved_if_chains(objs, defined_set, undefined_set):
-    to_remove = set()
+def collect_if_chains(objs):
+    """
+    return:
+        chains: dict
+            if_idx -> {
+                "branches": [branch_start_idx, ...],
+                "end": endif_idx
+            }
+    """
     chains = {}
+    stack = []
 
-    # First pass: collect branches for each if-chain
     for idx, lo in enumerate(objs):
-        # Opening of an if-chain
         if lo.is_directive_if() or lo.is_directive_ifdef() or lo.is_directive_ifndef():
-            chains[idx] = []
-            expr = lo.effective_cond or CondExpr.true()
-            v = eval_expr(expr, defined_set, undefined_set)
-            chains[idx].append((idx, v))
+            chains[idx] = {"branches": [idx], "end": None}
+            stack.append(idx)
 
-        # Elif / else belong to an existing if-chain
         elif lo.is_directive_elif() or lo.is_directive_else():
             parent = lo.related_if
             if parent in chains:
-                expr = lo.effective_cond or CondExpr.true()
-                v = eval_expr(expr, defined_set, undefined_set)
-                chains[parent].append((idx, v))
+                chains[parent]["branches"].append(idx)
 
-    # Second pass: detect fully resolved chains
-    for if_idx, branches in chains.items():
-        true_branches = [idx for idx, v in branches if v == TriValue.TRUE]
-        pending_branches = [idx for idx, v in branches if v == TriValue.PENDING]
+        elif lo.is_directive_endif():
+            parent = lo.related_if
+            if parent in chains:
+                chains[parent]["end"] = idx
+            if stack:
+                stack.pop()
 
-        # Only collapse if:
-        #   - exactly one TRUE branch
-        #   - no PENDING branches
-        if len(true_branches) != 1 or pending_branches:
-            continue
+    return chains
 
-        # Find matching #endif
-        end = None
-        for i in range(if_idx + 1, len(objs)):
-            if objs[i].is_directive_endif() and objs[i].related_if == if_idx:
-                end = i
-                break
+def collapse_fully_resolved_if_chains(objs, defined_set, undefined_set):
+    to_remove = set()
+    chains = collect_if_chains(objs)
+
+    for if_idx, info in chains.items():
+        branches = info["branches"]
+        end = info["end"]
         if end is None:
             continue
 
-        # Remove only directives that belong to this chain
-        for i in range(if_idx, end + 1):
-            lo = objs[i]
-            if (
-                lo.is_directive_if()
-                or lo.is_directive_ifdef()
-                or lo.is_directive_ifndef()
-                or lo.is_directive_elif()
-                or lo.is_directive_else()
-                or lo.is_directive_endif()
-            ):
+        results = []
+        for b in branches:
+            expr = objs[b].effective_cond or CondExpr.true()
+            v = eval_expr(expr, defined_set, undefined_set)
+            results.append((b, v))
+
+        true_branches = [b for b, v in results if v == TriValue.TRUE]
+        pending = any(v == TriValue.PENDING for _, v in results)
+
+        if len(true_branches) == 1 and not pending:
+            # remove directives only
+            for i in range(if_idx, end + 1):
+                lo = objs[i]
                 if lo.related_if == if_idx:
+                    to_remove.add(i)
+
+    return to_remove
+
+def remove_false_branches(objs, defined_set, undefined_set):
+    to_remove = set()
+    chains = collect_if_chains(objs)
+
+    for if_idx, info in chains.items():
+        branches = info["branches"]
+        end = info["end"]
+        if end is None:
+            continue
+
+        # build branch ranges
+        ranges = []
+        for i, start in enumerate(branches):
+            if i + 1 < len(branches):
+                stop = branches[i+1] - 1
+            else:
+                stop = end - 1
+            ranges.append((start, stop))
+
+        # evaluate and remove
+        for start, stop in ranges:
+            expr = objs[start].effective_cond or CondExpr.true()
+            v = eval_expr(expr, defined_set, undefined_set)
+            if v == TriValue.FALSE:
+                for i in range(start, stop + 1):
                     to_remove.add(i)
 
     return to_remove
@@ -476,57 +507,7 @@ def compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove):
                 v = eval_expr(expr, defined_set, undefined_set)
                 if v == TriValue.PENDING:
                     if_chain_pending[parent_idx] = True
-
-def remove_false_branches(objs, defined_set, undefined_set):
-    """
-    For each if-chain, remove entire branches whose *effective* condition
-    evaluates to FALSE.
-    A branch = directive (#if/#elif/#else) + all lines until next branch or endif.
-    """
-    to_remove = set()
-
-    # Collect all if-chains: if_idx -> list of branch start indices
-    chains = {}  # if_idx -> [branch_start_idx, ...]
-    for idx, lo in enumerate(objs):
-        if lo.is_directive_if() or lo.is_directive_ifdef() or lo.is_directive_ifndef():
-            chains[idx] = [idx]
-        elif lo.is_directive_elif() or lo.is_directive_else():
-            parent = lo.related_if
-            if parent in chains:
-                chains[parent].append(idx)
-
-    # For each chain, determine branch ranges and remove FALSE ones
-    for if_idx, branch_starts in chains.items():
-        # Find matching endif
-        end = None
-        for i in range(if_idx + 1, len(objs)):
-            if objs[i].is_directive_endif() and objs[i].related_if == if_idx:
-                end = i
-                break
-        if end is None:
-            continue
-
-        # Build branch ranges
-        branch_starts_sorted = sorted(branch_starts)
-        branch_ranges = []
-        for i, start in enumerate(branch_starts_sorted):
-            if i + 1 < len(branch_starts_sorted):
-                next_start = branch_starts_sorted[i + 1]
-                branch_ranges.append((start, next_start - 1))
-            else:
-                branch_ranges.append((start, end - 1))  # last branch body
-
-        # Evaluate each branch and remove FALSE ones
-        for start, stop in branch_ranges:
-            # IMPORTANT: use effective_cond here
-            expr = objs[start].effective_cond or CondExpr.true()
-            v = eval_expr(expr, defined_set, undefined_set)
-
-            if v == TriValue.FALSE:
-                for i in range(start, stop + 1):
-                    to_remove.add(i)
-
-    return to_remove
+    return if_chain_pending
 
 def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, idx_to_remove):
     for idx, lo in enumerate(objs):
@@ -578,6 +559,7 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, id
                 else:
                     idx_to_remove.add(idx)
                     continue
+
 def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[]):
     if "--debug" in sys.argv:
         print("===== OBJS DUMP =====")
