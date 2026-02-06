@@ -13,7 +13,6 @@ class CondType(Enum):
     DEFINE  = "D"
     UNDEF   = "U"
     NEUTRAL = "N"
-    COMPLEX = "X"
     CONST_BOOLEAN = "B"
 
 @dataclass
@@ -32,10 +31,6 @@ class CondAtom:
     @classmethod
     def neutral(cls, macro):
         return cls(CondType.NEUTRAL, macro)
-
-    @classmethod
-    def complex(cls):
-        return cls(CondType.COMPLEX, None)
 
     def __repr__(self):
         macro = self.macro if self.macro else "*"
@@ -212,7 +207,7 @@ def parse_lines(lines):
 
         elif m := regex_if.match(line):
             lo.directive = DirectiveKind.IF
-            lo.local_cond = CondExpr.atom_expr(CondAtom.complex())
+            lo.local_cond = CondExpr.Unknown(m.group(1).strip())
             lo.related_if = idx
             if_stack.append(idx)
             continue
@@ -235,7 +230,7 @@ def parse_lines(lines):
         elif m := regex_elif.match(line):
             lo.directive = DirectiveKind.ELIF
             resolve_parent_if(lo, if_stack, objs, idx)
-            lo.local_cond = CondExpr.atom_expr(CondAtom.complex())
+            lo.local_cond = CondExpr.Unknown(m.group(1).strip())
             continue
 
         elif regex_else.match(line):
@@ -318,9 +313,6 @@ def propagate_effective_conds(objs):
 def eval_atom(atom, defined_set, undefined_set):
     macro = atom.macro
 
-    if atom.kind == CondType.COMPLEX:
-        return TriValue.PENDING
-
     if atom.kind == CondType.CONST_BOOLEAN:
         return TriValue.TRUE if atom is TRUE_ATOM else TriValue.FALSE
 
@@ -390,8 +382,6 @@ def expr_to_if(expr):
             return f"!defined({atom.macro})"
         if atom.kind == CondType.NEUTRAL:
             return f"defined({atom.macro}) /* pending */"
-        if atom.kind == CondType.COMPLEX:
-            return "/* complex */"
         if atom.kind == CondType.CONST_BOOLEAN:
             return "1" if atom is TRUE_ATOM else "0"
 
