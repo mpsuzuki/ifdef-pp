@@ -164,17 +164,11 @@ regex_else   = re.compile(r'^\s*#\s*else\b')
 regex_endif  = re.compile(r'^\s*#\s*endif\b')
 regex_misc   = re.compile(r'^\s*#\s*([A-Za-z_]\w*)')
 
-def parent_obj(lo, objs):
-    idx = lo.related_if
-    if idx is None or idx < 0 or idx >= len(objs):
-        return None
-    return objs[idx]
-
 def resolve_parent_if(lo, if_stack, objs, idx):
     if not if_stack:
         raise SyntaxError(f"Unmatched directive at line {idx+1}: {lo.text}")
     lo.related_if = if_stack[-1]
-    return parent_obj(lo, objs)
+    return
 
 # ------------------------------------------------------------
 # parse_lines
