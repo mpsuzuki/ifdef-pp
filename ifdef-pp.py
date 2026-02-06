@@ -1,48 +1,25 @@
 #!/usr/bin/env python3
-import argparse
-import sys
-import os
 import re
-import difflib
-from pathlib import Path
-from dataclasses import dataclass, field
+import sys
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, List
 
-regex_directive_prefix = re.compile(r'^\s*#\s*')
-regex_misc   = re.compile(r'^\s*#\s*([A-Za-z_]\w*)')
-regex_ifdef  = re.compile(r'^\s*#\s*ifdef\s+(\w+)\b')
-regex_ifndef = re.compile(r'^\s*#\s*ifndef\s+(\w+)\b')
-regex_if     = re.compile(r'^\s*#\s*if\b(.*)')
-regex_elif_defined     = re.compile(r'^\s*#\s*elif\s+defined\s*\(\s*(\w+)\s*\)')
-regex_elif_not_defined = re.compile(r'^\s*#\s*elif\s+!\s*defined\s*\(\s*(\w+)\s*\)')
-regex_elif   = re.compile(r'^\s*#\s*elif\b(.*)')
-regex_else   = re.compile(r'^\s*#\s*else\b')
-regex_endif  = re.compile(r'^\s*#\s*endif\b')
-
-
-class DirectiveKind(Enum):
-    NONE     = auto()	# normal content, not preprocessor directive
-    DISABLED = auto()	# preprocessor directive, known type, but disabled
-    PP_MISC  = auto()	# preprocessor directive, unknown type, would not be treated
-    IF       = auto()	# if
-    IFDEF    = auto()	# ifdef
-    IFNDEF   = auto()	# ifndef
-    ELIF     = auto()	# elif
-    ELSE     = auto()	# else
-    ENDIF    = auto()	# endif
+# ------------------------------------------------------------
+# CondAtom: represents a single macro condition (pending)
+# ------------------------------------------------------------
 
 class CondType(Enum):
-    DEFINE  = "D"	# D:A (emit this line if A is defined or neutral)
-    UNDEF   = "U"	# U:A (emit this line if A is undefined or neutral)
-    NEUTRAL = "N"	# N:A or N:* (emit this line if A is neutral)
-    COMPLEX = "X"	# X:* (emit this line always - condition is complex)
-    CONST_BOOLEAN = "B"	# B:* (emit this line always - condition is constant, true or false)
+    DEFINE  = "D"
+    UNDEF   = "U"
+    NEUTRAL = "N"
+    COMPLEX = "X"
+    CONST_BOOLEAN = "B"
 
 @dataclass
 class CondAtom:
     kind: CondType
-    macro: Optional[str]  # None for COMPLEX or NEUTRAL with "*"
+    macro: Optional[str]
 
     @classmethod
     def define(cls, macro):
@@ -53,613 +30,635 @@ class CondAtom:
         return cls(CondType.UNDEF, macro)
 
     @classmethod
-    def complex(cls, macro = None):
-        return cls(CondType.COMPLEX, macro)
-
-    @classmethod
     def neutral(cls, macro):
         return cls(CondType.NEUTRAL, macro)
 
+    @classmethod
+    def complex(cls):
+        return cls(CondType.COMPLEX, None)
+
     def __repr__(self):
-        macro = self.macro if self.has_macro() else "*"
+        macro = self.macro if self.macro else "*"
         return f"{self.kind.value}:{macro}"
-
-    def is_define(self):
-        return self.kind == CondType.DEFINE
-    def is_undef(self):
-        return self.kind == CondType.UNDEF
-    def is_complex(self):
-        return self.kind == CondType.COMPLEX
-    def is_neutral(self):
-        return self.kind == CondType.NEUTRAL
-
-    def has_macro(self):
-        return self.macro is not None
-
-    def negated(self, keep_macro = False):
-        if self.is_define():
-            return CondAtom.undef(self.macro)
-        if self.is_undef():
-            return CondAtom.define(self.macro)
-        return CondAtom.neutral(self.macro if keep_macro else None)
-
-    def neutralized(self):
-        if self.has_macro():
-            return CondAtom.neutral(self.macro)
-        else:
-            return CondAtom.complex()
 
 class TrueAtom(CondAtom):
     def __init__(self):
-        self.kind = CondType.CONST_BOOLEAN
-        self.macro = None
+        super().__init__(CondType.CONST_BOOLEAN, None)
         self.value = True
-    def __repr__(self): return "<True>"
-    def negated(self): return FALSE_ATOM
+
+    def __repr__(self):
+        return "<True>"
 
 class FalseAtom(CondAtom):
     def __init__(self):
-        self.kind = CondType.CONST_BOOLEAN
-        self.macro = None
+        super().__init__(CondType.CONST_BOOLEAN, None)
         self.value = False
-    def __repr__(self): return "<False>"
-    def negated(self): return TRUE_ATOM
 
-TRUE_ATOM  = TrueAtom()
+    def __repr__(self):
+        return "<False>"
+
+TRUE_ATOM = TrueAtom()
 FALSE_ATOM = FalseAtom()
+
+# ------------------------------------------------------------
+# CondExpr: boolean expression tree
+# ------------------------------------------------------------
+
+class CondExprKind(Enum):
+    ATOM = auto()
+    AND  = auto()
+    OR   = auto()
+    NOT  = auto()
+
+@dataclass
+class CondExpr:
+    kind: CondExprKind
+    atom: Optional[CondAtom] = None
+    left: Optional["CondExpr"] = None
+    right: Optional["CondExpr"] = None
+
+    @classmethod
+    def atom_expr(cls, atom):
+        return cls(CondExprKind.ATOM, atom=atom)
+
+    @classmethod
+    def true(cls):
+        return cls.atom_expr(TRUE_ATOM)
+
+    @classmethod
+    def false(cls):
+        return cls.atom_expr(FALSE_ATOM)
+
+    @classmethod
+    def And(cls, a, b):
+        return cls(CondExprKind.AND, left=a, right=b)
+
+    @classmethod
+    def Or(cls, a, b):
+        return cls(CondExprKind.OR, left=a, right=b)
+
+    @classmethod
+    def Not(cls, a):
+        return cls(CondExprKind.NOT, left=a)
+
+# ------------------------------------------------------------
+# TriValue: 3-valued logic
+# ------------------------------------------------------------
+
+class TriValue(Enum):
+    TRUE = auto()
+    FALSE = auto()
+    PENDING = auto()
+
+# ------------------------------------------------------------
+# LineObj: represents one line of source
+# ------------------------------------------------------------
+
+class DirectiveKind(Enum):
+    NONE     = auto()
+    PP_MISC  = auto()
+    IF       = auto()
+    IFDEF    = auto()
+    IFNDEF   = auto()
+    ELIF     = auto()
+    ELSE     = auto()
+    ENDIF    = auto()
+    DISABLED = auto()
 
 @dataclass
 class LineObj:
     text: str
     directive: DirectiveKind = DirectiveKind.NONE
     related_if: Optional[int] = None
-    local_conds: List[CondAtom] = field(default_factory=list)
-    effective_conds: List[CondAtom] = field(default_factory=list)
+    local_cond: Optional[CondExpr] = None
+    effective_cond: Optional[CondExpr] = None
 
-    def is_directive_none(self):
-        return self.directive == DirectiveKind.NONE
-    def is_directive_disabled(self):
-        return self.directive == DirectiveKind.DISABLED
-    def is_directive_pp_misc(self):
-        return self.directive == DirectiveKind.PP_MISC
-    def is_directive_if(self):
-        return self.directive == DirectiveKind.IF
-    def is_directive_ifdef(self):
-        return self.directive == DirectiveKind.IFDEF
-    def is_directive_ifndef(self):
-        return self.directive == DirectiveKind.IFNDEF
-    def is_directive_elif(self):
-        return self.directive == DirectiveKind.ELIF
-    def is_directive_else(self):
-        return self.directive == DirectiveKind.ELSE
-    def is_directive_endif(self):
-        return self.directive == DirectiveKind.ENDIF
+    def is_directive_if(self): return self.directive == DirectiveKind.IF
+    def is_directive_ifdef(self): return self.directive == DirectiveKind.IFDEF
+    def is_directive_ifndef(self): return self.directive == DirectiveKind.IFNDEF
+    def is_directive_elif(self): return self.directive == DirectiveKind.ELIF
+    def is_directive_else(self): return self.directive == DirectiveKind.ELSE
+    def is_directive_endif(self): return self.directive == DirectiveKind.ENDIF
+    def is_directive_none(self): return self.directive == DirectiveKind.NONE
+    def is_directive_pp_misc(self): return self.directive == DirectiveKind.PP_MISC
+    def is_directive_disabled(self): return self.directive == DirectiveKind.DISABLED
 
-    def is_single_define(self):
-        return len(self.local_conds) == 1 and self.local_conds[0].is_define()
-
-    def is_single_undef(self):
-        return len(self.local_conds) == 1 and self.local_conds[0].is_undef()
-
-    def negated_conds(self):
-        return [ atom.negated()
-                 for atom in self.local_conds ]
-
-    def neutralized_conds(self):
-        return [ atom.neutralized()
-                 for atom in self.local_conds ]
-
-    def neutralized_macro_conds(self):
-        return [ atom.neutralized()
-                 for atom in self.local_conds
-                 if atom.has_macro() ]
-
-    def directive_prefix(self):
-        m = regex_directive_prefix.match(self.text)
-        return m.group(0) if m else None
+# ------------------------------------------------------------
+# IfFrame: used during propagation
+# ------------------------------------------------------------
 
 @dataclass
-class AppleLibcBlock:
-    begin_libc: Optional[int]
-    end_libc: Optional[int]
-    is_empty: bool = True
+class IfFrame:
+    parent_effective: CondExpr
+    taken: CondExpr
+
+# ------------------------------------------------------------
+# Regex for parsing directives
+# ------------------------------------------------------------
+
+regex_ifdef  = re.compile(r'^\s*#\s*ifdef\s+(\w+)\b')
+regex_ifndef = re.compile(r'^\s*#\s*ifndef\s+(\w+)\b')
+regex_if     = re.compile(r'^\s*#\s*if\b(.*)')
+regex_elif_defined     = re.compile(r'^\s*#\s*elif\s+defined\s*\(\s*(\w+)\s*\)')
+regex_elif_not_defined = re.compile(r'^\s*#\s*elif\s+!\s*defined\s*\(\s*(\w+)\s*\)')
+regex_elif   = re.compile(r'^\s*#\s*elif\b(.*)')
+regex_else   = re.compile(r'^\s*#\s*else\b')
+regex_endif  = re.compile(r'^\s*#\s*endif\b')
+regex_misc   = re.compile(r'^\s*#\s*([A-Za-z_]\w*)')
 
 def parent_obj(lo, objs):
-    parent_idx = lo.related_if
-    if parent_idx is None or parent_idx < 0 or len(objs) <= parent_idx:
+    idx = lo.related_if
+    if idx is None or idx < 0 or idx >= len(objs):
         return None
-    return objs[parent_idx]
+    return objs[idx]
 
-def resolve_parent_if(lo, if_stack, objs):
+def resolve_parent_if(lo, if_stack, objs, idx):
     if not if_stack:
-        raise SyntaxError(f"unmatched '{lo.text}' at line {idx+1}")
+        raise SyntaxError(f"Unmatched directive at line {idx+1}: {lo.text}")
     lo.related_if = if_stack[-1]
     return parent_obj(lo, objs)
 
+# ------------------------------------------------------------
+# parse_lines
+# ------------------------------------------------------------
+
 def parse_lines(lines):
-    objs: List[LineObj] = []
-    if_stack: List[int] = []
+    objs = []
+    if_stack = []
 
     for idx, line in enumerate(lines):
         lo = LineObj(text=line)
         objs.append(lo)
 
-        # #ifdef
         if m := regex_ifdef.match(line):
             lo.directive = DirectiveKind.IFDEF
-
-            macro = m.group(1)
-            lo.local_conds = [CondAtom.define(macro)]
-
+            lo.local_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
+            lo.related_if = idx
             if_stack.append(idx)
-
             continue
 
-        # #ifndef
         elif m := regex_ifndef.match(line):
             lo.directive = DirectiveKind.IFNDEF
-
-            macro = m.group(1)
-            lo.local_conds = [CondAtom.undef(macro)]
-
+            lo.local_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
+            lo.related_if = idx
             if_stack.append(idx)
-
             continue
 
-        # #if (complex/composite condition)
         elif m := regex_if.match(line):
             lo.directive = DirectiveKind.IF
-
-            lo.local_conds = [CondAtom.complex()]
-
+            lo.local_cond = CondExpr.atom_expr(CondAtom.complex())
+            lo.related_if = idx
             if_stack.append(idx)
-
             continue
 
-        # #elif defined(X)
         elif m := regex_elif_defined.match(line):
             lo.directive = DirectiveKind.ELIF
-
-            parent = resolve_parent_if(lo, if_stack, objs)
-            lo.local_conds = parent.negated_conds()
-
-            macro = m.group(1)
-            lo.local_conds.append(CondAtom.define(macro))
-
+            resolve_parent_if(lo, if_stack, objs, idx)
+            lo.local_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
             continue
 
-        # #elif !defined(X)
         elif m := regex_elif_not_defined.match(line):
             lo.directive = DirectiveKind.ELIF
-
-            parent = resolve_parent_if(lo, if_stack, objs)
-            lo.local_conds = parent.negated_conds()
-
+            resolve_parent_if(lo, if_stack, objs, idx)
             macro = m.group(1)
-            lo.local_conds.append(CondAtom.undef(macro))
-
+            lo.local_cond = CondExpr.Not(
+                CondExpr.atom_expr(CondAtom.neutral(macro))
+            )
             continue
 
-        # #elif (complex)
         elif m := regex_elif.match(line):
             lo.directive = DirectiveKind.ELIF
-
-            # no need for resolved parent, but set lo.related_if
-            resolve_parent_if(lo, if_stack, objs)
-            lo.local_conds = [CondAtom.complex()]
-
+            resolve_parent_if(lo, if_stack, objs, idx)
+            lo.local_cond = CondExpr.atom_expr(CondAtom.complex())
             continue
 
-        # #else (negate)
         elif regex_else.match(line):
             lo.directive = DirectiveKind.ELSE
-
-            parent = resolve_parent_if(lo, if_stack, objs)
-            lo.local_conds = parent.negated_conds()
-
+            resolve_parent_if(lo, if_stack, objs, idx)
+            lo.local_cond = CondExpr.true()
             continue
 
-        # #endif ( NEUTRAL )
         elif regex_endif.match(line):
             lo.directive = DirectiveKind.ENDIF
-
-            parent = resolve_parent_if(lo, if_stack, objs)
-            lo.local_conds.extend(parent.neutralized_conds())
-
+            resolve_parent_if(lo, if_stack, objs, idx)
+            lo.local_cond = CondExpr.true()
             if_stack.pop()
             continue
 
-        # #define, #undef, #include, #pragma, #error, #line, etc are marked but not parsed.
         elif regex_misc.match(line):
             lo.directive = DirectiveKind.PP_MISC
             continue
 
+        else:
+            lo.directive = DirectiveKind.NONE
+
     if if_stack:
-        raise SyntaxError("unclosed #if block(s)")
+        raise SyntaxError("Unclosed #if block(s)")
 
     return objs
 
-def merge_conds(conds_a, conds_b):
-    merged = []
-    seen = set()
-    for atom in conds_a + conds_b:
-        if atom.macro not in seen:
-            merged.append(atom)
-            seen.add(atom.macro)
-    return merged
+# ------------------------------------------------------------
+# propagate_effective_conds
+# ------------------------------------------------------------
 
-def propagate_effective_conds(objs: List[LineObj]):
+def propagate_effective_conds(objs):
+    current_effective = CondExpr.true()
+    stack = []
+
+    for lo in objs:
+
+        if lo.is_directive_none() or lo.is_directive_pp_misc() or lo.is_directive_disabled():
+            lo.effective_cond = current_effective
+            continue
+
+        if lo.is_directive_if() or lo.is_directive_ifdef() or lo.is_directive_ifndef():
+            cond_if = lo.local_cond or CondExpr.true()
+            lo.effective_cond = CondExpr.And(current_effective, cond_if)
+
+            frame = IfFrame(parent_effective=current_effective, taken=cond_if)
+            stack.append(frame)
+
+            current_effective = lo.effective_cond
+            continue
+
+        if lo.is_directive_elif():
+            frame = stack[-1]
+            cond_elif = lo.local_cond or CondExpr.true()
+
+            local = CondExpr.And(cond_elif, CondExpr.Not(frame.taken))
+            lo.effective_cond = CondExpr.And(frame.parent_effective, local)
+
+            frame.taken = CondExpr.Or(frame.taken, cond_elif)
+            current_effective = lo.effective_cond
+            continue
+
+        if lo.is_directive_else():
+            frame = stack[-1]
+            local = CondExpr.Not(frame.taken)
+            lo.effective_cond = CondExpr.And(frame.parent_effective, local)
+            current_effective = lo.effective_cond
+            continue
+
+        if lo.is_directive_endif():
+            frame = stack.pop()
+            lo.effective_cond = frame.parent_effective
+            current_effective = frame.parent_effective
+            continue
+
+# ------------------------------------------------------------
+# eval_atom
+# ------------------------------------------------------------
+
+def eval_atom(atom, defined_set, undefined_set):
+    macro = atom.macro
+
+    if atom.kind == CondType.COMPLEX:
+        return TriValue.PENDING
+
+    if atom.kind == CondType.CONST_BOOLEAN:
+        return TriValue.TRUE if atom is TRUE_ATOM else TriValue.FALSE
+
+    if atom.kind == CondType.NEUTRAL:
+        if macro in defined_set:
+            return TriValue.TRUE
+        if macro in undefined_set:
+            return TriValue.FALSE
+        return TriValue.PENDING
+
+    if atom.kind == CondType.DEFINE:
+        if macro in defined_set:
+            return TriValue.TRUE
+        if macro in undefined_set:
+            return TriValue.FALSE
+        return TriValue.PENDING
+
+    if atom.kind == CondType.UNDEF:
+        if macro in defined_set:
+            return TriValue.FALSE
+        if macro in undefined_set:
+            return TriValue.TRUE
+        return TriValue.PENDING
+
+    return TriValue.PENDING
+
+# ------------------------------------------------------------
+# eval_expr
+# ------------------------------------------------------------
+
+def eval_expr(expr, defined_set, undefined_set):
+    if expr.kind == CondExprKind.ATOM:
+        return eval_atom(expr.atom, defined_set, undefined_set)
+
+    if expr.kind == CondExprKind.NOT:
+        v = eval_expr(expr.left, defined_set, undefined_set)
+        if v == TriValue.TRUE: return TriValue.FALSE
+        if v == TriValue.FALSE: return TriValue.TRUE
+        return TriValue.PENDING
+
+    if expr.kind == CondExprKind.AND:
+        v1 = eval_expr(expr.left, defined_set, undefined_set)
+        v2 = eval_expr(expr.right, defined_set, undefined_set)
+        if v1 == TriValue.FALSE or v2 == TriValue.FALSE:
+            return TriValue.FALSE
+        if v1 == TriValue.TRUE and v2 == TriValue.TRUE:
+            return TriValue.TRUE
+        return TriValue.PENDING
+
+    if expr.kind == CondExprKind.OR:
+        v1 = eval_expr(expr.left, defined_set, undefined_set)
+        v2 = eval_expr(expr.right, defined_set, undefined_set)
+        if v1 == TriValue.TRUE or v2 == TriValue.TRUE:
+            return TriValue.TRUE
+        if v1 == TriValue.FALSE and v2 == TriValue.FALSE:
+            return TriValue.FALSE
+        return TriValue.PENDING
+
+    return TriValue.PENDING
+
+# ------------------------------------------------------------
+# expr_to_if (minimal)
+# ------------------------------------------------------------
+
+def expr_to_if(expr):
+    if expr.kind == CondExprKind.ATOM:
+        atom = expr.atom
+        if atom.kind == CondType.DEFINE:
+            return f"defined({atom.macro})"
+        if atom.kind == CondType.UNDEF:
+            return f"!defined({atom.macro})"
+        if atom.kind == CondType.NEUTRAL:
+            return f"defined({atom.macro}) /* pending */"
+        if atom.kind == CondType.COMPLEX:
+            return "/* complex */"
+        if atom.kind == CondType.CONST_BOOLEAN:
+            return "1" if atom is TRUE_ATOM else "0"
+
+    if expr.kind == CondExprKind.NOT:
+        return f"!({expr_to_if(expr.left)})"
+
+    if expr.kind == CondExprKind.AND:
+        return f"({expr_to_if(expr.left)} && {expr_to_if(expr.right)})"
+
+    if expr.kind == CondExprKind.OR:
+        return f"({expr_to_if(expr.left)} || {expr_to_if(expr.right)})"
+
+    return "/* unknown */"
+
+# ------------------------------------------------------------
+# filter_output_lines
+# ------------------------------------------------------------
+
+def collapse_fully_resolved_if_chains(objs, defined_set, undefined_set):
+    to_remove = set()
+    chains = {}
+
+    # First pass: collect branches for each if-chain
+    for idx, lo in enumerate(objs):
+        # Opening of an if-chain
+        if lo.is_directive_if() or lo.is_directive_ifdef() or lo.is_directive_ifndef():
+            chains[idx] = []
+            expr = lo.effective_cond or CondExpr.true()
+            v = eval_expr(expr, defined_set, undefined_set)
+            chains[idx].append((idx, v))
+
+        # Elif / else belong to an existing if-chain
+        elif lo.is_directive_elif() or lo.is_directive_else():
+            parent = lo.related_if
+            if parent in chains:
+                expr = lo.effective_cond or CondExpr.true()
+                v = eval_expr(expr, defined_set, undefined_set)
+                chains[parent].append((idx, v))
+
+    # Second pass: detect fully resolved chains
+    for if_idx, branches in chains.items():
+        true_branches = [idx for idx, v in branches if v == TriValue.TRUE]
+        pending_branches = [idx for idx, v in branches if v == TriValue.PENDING]
+
+        # Only collapse if:
+        #   - exactly one TRUE branch
+        #   - no PENDING branches
+        if len(true_branches) != 1 or pending_branches:
+            continue
+
+        # Find matching #endif
+        end = None
+        for i in range(if_idx + 1, len(objs)):
+            if objs[i].is_directive_endif() and objs[i].related_if == if_idx:
+                end = i
+                break
+        if end is None:
+            continue
+
+        # Remove only directives that belong to this chain
+        for i in range(if_idx, end + 1):
+            lo = objs[i]
+            if (
+                lo.is_directive_if()
+                or lo.is_directive_ifdef()
+                or lo.is_directive_ifndef()
+                or lo.is_directive_elif()
+                or lo.is_directive_else()
+                or lo.is_directive_endif()
+            ):
+                if lo.related_if == if_idx:
+                    to_remove.add(i)
+
+    return to_remove
+
+def remove_false_branches(objs, defined_set, undefined_set):
     """
-    Propagate conditions downward.
-    effective_conds = conditions required for THIS line to appear.
-    local_conds     = conditions introduced BY this line (affecting following lines).
-    cond_stack      = accumulated D/U/N conditions from outer scopes.
+    For each if-chain, remove entire branches whose *effective* condition
+    evaluates to FALSE.
+    A branch = directive (#if/#elif/#else) + all lines until next branch or endif.
     """
-    cond_stack: List[List[CondAtom]] = [[]]
+    to_remove = set()
+
+    # Collect all if-chains: if_idx -> list of branch start indices
+    chains = {}  # if_idx -> [branch_start_idx, ...]
+    for idx, lo in enumerate(objs):
+        if lo.is_directive_if() or lo.is_directive_ifdef() or lo.is_directive_ifndef():
+            chains[idx] = [idx]
+        elif lo.is_directive_elif() or lo.is_directive_else():
+            parent = lo.related_if
+            if parent in chains:
+                chains[parent].append(idx)
+
+    # For each chain, determine branch ranges and remove FALSE ones
+    for if_idx, branch_starts in chains.items():
+        # Find matching endif
+        end = None
+        for i in range(if_idx + 1, len(objs)):
+            if objs[i].is_directive_endif() and objs[i].related_if == if_idx:
+                end = i
+                break
+        if end is None:
+            continue
+
+        # Build branch ranges
+        branch_starts_sorted = sorted(branch_starts)
+        branch_ranges = []
+        for i, start in enumerate(branch_starts_sorted):
+            if i + 1 < len(branch_starts_sorted):
+                next_start = branch_starts_sorted[i + 1]
+                branch_ranges.append((start, next_start - 1))
+            else:
+                branch_ranges.append((start, end - 1))  # last branch body
+
+        # Evaluate each branch and remove FALSE ones
+        for start, stop in branch_ranges:
+            # IMPORTANT: use effective_cond here
+            expr = objs[start].effective_cond or CondExpr.true()
+            v = eval_expr(expr, defined_set, undefined_set)
+
+            if v == TriValue.FALSE:
+                for i in range(start, stop + 1):
+                    to_remove.add(i)
+
+    return to_remove
+
+def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[]):
+    if "--debug" in sys.argv:
+        print("===== OBJS DUMP =====")
+        for i, lo in enumerate(objs):
+            print(f"[{i:03}] {lo.text.rstrip()}   dir={lo.directive}   related_if={lo.related_if}")
+        print("======================")
+
+    idx_to_remove = set()
+
+    # Step 1: collapse fully resolved if-chains
+    collapse = collapse_fully_resolved_if_chains(objs, defined_set, undefined_set)
+    idx_to_remove |= collapse
+
+    # Step 2: detect pending status of each if-chain
+    if_chain_pending = {}
 
     for idx, lo in enumerate(objs):
-        parent = parent_obj(lo, objs)
-        current_conds  = cond_stack[-1] if len(cond_stack) > 0 else []
-        surround_conds = cond_stack[-2] if len(cond_stack) > 1 else []
-
-        if lo.is_directive_ifdef() or lo.is_directive_ifndef():
-            lo.effective_conds = current_conds + lo.neutralized_conds()
-            cond_stack.append(current_conds + lo.local_conds)
+        if idx in idx_to_remove:
             continue
 
-        elif lo.is_directive_if():
-            lo.effective_conds = current_conds.copy()
-            cond_stack.append(current_conds + lo.local_conds)
+        if lo.is_directive_if() or lo.is_directive_ifdef() or lo.is_directive_ifndef():
+            expr = lo.effective_cond or CondExpr.true()
+            v = eval_expr(expr, defined_set, undefined_set)
+            if_chain_pending[idx] = (v == TriValue.PENDING)
+
+        elif lo.is_directive_elif() or lo.is_directive_else():
+            parent_idx = lo.related_if
+            if parent_idx is not None and parent_idx in if_chain_pending:
+                expr = lo.effective_cond or CondExpr.true()
+                v = eval_expr(expr, defined_set, undefined_set)
+                if v == TriValue.PENDING:
+                    if_chain_pending[parent_idx] = True
+
+    # Step 2.5: remove FALSE branches entirely (only when -U is used)
+    false_branch_remove = remove_false_branches(objs, defined_set, undefined_set)
+    idx_to_remove |= false_branch_remove
+
+    # Step 3: normal filtering
+    for idx, lo in enumerate(objs):
+        if idx in idx_to_remove:
             continue
 
-        elif lo.is_directive_elif():
-            lo.effective_conds = surround_conds.copy()
-            lo.effective_conds += merge_conds( parent.neutralized_macro_conds(),
-                                               lo.neutralized_macro_conds() )
-
-            # replace current layer by negated parental local_conds and my local_conds
-            cond_stack.pop()
-            cond_stack.append( surround_conds + parent.negated_conds() + lo.local_conds )
-            continue
-
-        elif lo.is_directive_else():
-            lo.effective_conds = surround_conds + parent.neutralized_macro_conds()
-
-            cond_stack.pop()
-            cond_stack.append( surround_conds + parent.negated_conds() )
-            continue
-
-        elif lo.is_directive_endif():
-            lo.effective_conds = surround_conds + parent.neutralized_macro_conds()
-
-            cond_stack.pop()
-            continue
-
+        # Directives use local_cond; normal lines use effective_cond
+        if (
+            lo.is_directive_if()
+            or lo.is_directive_ifdef()
+            or lo.is_directive_ifndef()
+            or lo.is_directive_elif()
+            or lo.is_directive_else()
+        ):
+            expr = lo.local_cond or CondExpr.true()
         else:
-            lo.effective_conds = current_conds.copy()
+            expr = lo.effective_cond or CondExpr.true()
 
-def eval_effective_conds(effective_conds, defined_set, undefined_set):
+        v = eval_expr(expr, defined_set, undefined_set)
 
-    for atom in effective_conds:
-        macro = atom.macro
+        # Check if parent if-chain is pending
+        parent_pending = False
+        if lo.related_if is not None and lo.related_if in if_chain_pending:
+            if if_chain_pending[lo.related_if]:
+                parent_pending = True
 
-        if atom.is_complex():
+        # 1) Remove inactive lines (only when parent is not pending)
+        if v == TriValue.FALSE and not parent_pending:
+            idx_to_remove.add(idx)
             continue
 
-        if atom.is_neutral():
-            if macro in defined_set or macro in undefined_set:
-                return False
+        # 2) Remove directive lines that are fully TRUE (except #endif)
+        if v == TriValue.TRUE and not parent_pending and (
+            lo.is_directive_if()
+            or lo.is_directive_ifdef()
+            or lo.is_directive_ifndef()
+            or lo.is_directive_elif()
+            or lo.is_directive_else()
+        ):
+            idx_to_remove.add(idx)
             continue
 
-        if atom.is_define():
-            if macro in defined_set:
-                continue
-            if macro in undefined_set:
-                return False
-            continue
+        # 3) Special handling for #endif
+        if lo.is_directive_endif():
+            parent_idx = lo.related_if
+            if parent_idx is not None and parent_idx in if_chain_pending:
+                if if_chain_pending[parent_idx]:
+                    continue
+                else:
+                    idx_to_remove.add(idx)
+                    continue
 
-        if atom.is_undef():
-            if macro in defined_set:
-                return False
-            if macro in undefined_set:
-                continue
-            continue
+    return postprocess_repair_structure(objs, idx_to_remove)
 
-    return True
+# ------------------------------------------------------------
+# postprocess_repair_structure
+# ------------------------------------------------------------
 
-def postprocess_repair_structure(objs: List[LineObj], removed: set):
-    """
-    Repair broken #if/#elif/#else/#endif structures after filtering.
-    If the parent #if was removed but an #elif or #else remains,
-    convert them into standalone #ifdef/#ifndef blocks.
-    """
-
+def postprocess_repair_structure(objs, removed):
     new_lines = []
-    for idx, lo in enumerate(objs):
 
+    for idx, lo in enumerate(objs):
         if idx in removed:
             continue
 
-        # If this is an ELIF whose parent was removed
         if lo.is_directive_elif():
             parent = lo.related_if
             if parent in removed:
-                # Convert to standalone #ifdef / #ifndef
-                if lo.is_single_define():
-                    new_lines.append(f"{lo.directive_prefix()}ifdef {lo.local_conds[0].macro}")
-                    continue
-                elif lo.is_single_undef():
-                    new_lines.append(f"{lo.directive_prefix()}ifndef {lo.local_conds[0].macro}")
-                    continue
-                else:
-                    new_lines.append(f"{lo.directive_prefix()}if /* complex */")
-                    continue
+                new_lines.append(f"#if {expr_to_if(lo.local_cond)}")
+                continue
 
-        # If this is an ELSE whose parent was removed
         if lo.is_directive_else():
             parent = lo.related_if
             if parent in removed:
-                new_lines.append(f"{lo.directive_prefix()}else")
+                new_lines.append("#else")
                 continue
 
-        # ENDIF always stays
         new_lines.append(lo.text)
 
     return new_lines
 
-def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks):
-    idx_to_remove = set()
-
-    # First pass: evaluate conditions
-    for idx, lo in enumerate(objs):
-        if not eval_effective_conds(lo.effective_conds, defined_set, undefined_set):
-            idx_to_remove.add(idx)
-            continue
-
-        for blk in apple_libc_blocks:
-            if blk.begin_libc < idx < blk.end_libc:
-                blk.is_empty = False
-
-    # Remove empty Apple Libc blocks
-    for blk in apple_libc_blocks:
-        if blk.is_empty:
-            idx_to_remove.add(blk.begin_libc)
-            idx_to_remove.add(blk.end_libc)
-
-    # --- NEW: repair structure ---
-    repaired = postprocess_repair_structure(objs, idx_to_remove)
-
-    return repaired
-
-def detect_header_guard(objs, debug = False):
-    if debug:
-        print("start detect_header_guard()")
-
-    # lookup last endif
-    endif_idx = None
-    for i in reversed(range(len(objs))):
-        if objs[i].is_directive_endif():
-            endif_idx = i
-            break
-
-    if endif_idx is None:
-        return None
-
-    if debug:
-        print(f"detect_header_guard: last endif is at {endif_idx}")
-
-    endif_obj = objs[endif_idx]
-
-    # if no related_if for the last endif, the source is broken
-    if endif_obj.related_if is None:
-        return None
-
-    if_idx = endif_obj.related_if
-    if_obj = objs[if_idx]
-
-    if debug:
-        print(f"detect_header_guard: condition starts at {if_idx}")
-
-    # confirm related pp is '#ifndef X' or '#if !defined(X)'
-    if if_obj.directive not in (DirectiveKind.IFNDEF, DirectiveKind.IF):
-        return None
-
-    if debug:
-        print(f"detect_header_guard: {if_idx} is '#ifndef' or '#if defined'")
-
-    # extract a macro used for header guard
-    #   confirm local_conds has one macro only
-    if len(if_obj.local_conds) != 1:
-        return None
-
-    cond_atom = if_obj.local_conds[0]
-    macro = cond_atom.macro
-
-    if debug:
-        print(f"detect_header_guard: {macro} is header guard macro")
-
-    # lookup next pp after first #ifndef or #if !defined()
-    regex_cpp_directive = re.compile(r'^\s*#\s*([A-Za-z_]\w*)')
-
-    j = if_idx + 1
-    while j < len(objs) and not regex_cpp_directive.match(objs[j].text):
-        j += 1
-
-    if j >= len(objs):
-        return None
-
-    if debug:
-        print(f"detect_header_guard: {macro} might be redefined at {j}")
-
-    # confirm the 2nd pp defines the macro used for header guard
-    regex_define_macro = re.compile(r'^\s*#\s*define\s+([A-Za-z_]\w*)')
-    m = regex_define_macro.match(objs[j].text)
-    if m is None:
-        return None
-
-    if m.group(1) != macro:
-        return None
-
-    define_idx = j
-
-    if debug:
-        print(f"detect_header_guard: {macro} is confirmed to be redefined at {j}")
-
-    # confirm first #ifndef or #if !defined(X) is the first pp.
-    for k in range(if_idx):
-        if objs[k].directive is not DirectiveKind.NONE:
-            # if there is earlier pp, this might not be header guard.
-            if debug:
-                print(f"detect_header_guard: first cpp directive is found at {k}")
-            return None
-
-    if debug:
-        print(f"detect_header_guard: {if_idx} is confirmed to be the first cpp directive")
-
-    # decide this is header guard.
-    return (if_idx, define_idx, endif_idx, macro)
-
-def get_words_from_file(path_file):
-    words = []
-    with open(path_file, "r") as fh:
-        for line in fh.read().splitlines():
-            tok = re.sub(r"#.*", "", line).strip()
-            if tok:
-                words.append(tok)
-    return words
-
-def open_fh_to_write(do_mkdir, str_dest_dir, str_path, file_suffix):
-    if str_path in [None, "-", 0, "stdout", "/dev/stdout", sys.stdout]:
-        return ("/dev/stdout", sys.stdout)
-    elif file_suffix:
-        pth = Path( str_path + file_suffix )
-    else:
-        pth = Path( str_path )
-
-    if str_dest_dir:
-        pth = Path( str_dest_dir ) / pth
-
-    if do_mkdir:
-        pth.parent.mkdir( parents = True, exist_ok = True )
-
-    fh = open( pth, "w" )
-    print(f"# write {pth}", file = sys.stderr)
-    return ( str(pth), fh )
-
-def collect_apple_libc_blocks(lines):
-    regex_begin_libc = re.compile(r"^\s*//\s*Begin-Libc\s*$")
-    regex_end_libc   = re.compile(r"^\s*//\s*End-Libc\s*$")
-    blocks = []
-    for idx, line in enumerate(lines):
-        if regex_begin_libc.match(line):
-            blocks.append( AppleLibcBlock(idx, None, True) )
-        elif regex_end_libc.match(line):
-            if blocks[-1].end_libc:
-                blocks.append( AppleLibcBlock(None, None, True) )
-            blocks[-1].end_libc = idx
-    blocks = [blk for blk in blocks if blk.begin_libc and blk.end_libc]
-    return blocks
+# ------------------------------------------------------------
+# main
+# ------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(
-        formatter_class = argparse.RawTextHelpFormatter
-    )
-    parser.add_argument("-D", action = "append", default = [],
-                        help = "Define macro")
-    parser.add_argument("-U", action = "append", default = [],
-                        help = "Undefine macro")
-    parser.add_argument("-o", type = str, default = None,
-                        help = "Write output to <pathname>")
-    parser.add_argument("--dest-dir", "--destdir", type = str, default = None,
-        help = "Set DESTDIR to emit output files")
-    parser.add_argument("--debug", action = "store_true",
-        help = "Debug mode")
-    parser.add_argument("--patch", action = "store_true",
-        help = "Emit as an unified patch")
-    parser.add_argument("--patch-output", type = str,
-        help = "Emit unified patch output to file")
-    parser.add_argument("--patch-suffix", type = str, default = ".diff",
-        help = "Set suffix for patch output")
-    parser.add_argument("--no-mkdir", action = "store_true",
-        help = "Do not make parental directories during output")
-    parser.add_argument("--analyze-header-guard", action = "store_true",
-        help = "Treat header guards (#ifndef X, #define X, #endif) as normal conditions.\n"
-               "By default, macros used in header guards cannot be defined by -D.")
-    parser.add_argument("--list-macros-define", type = str,
-        help = "Read file of symbols to be defined")
-    parser.add_argument("--list-macros-undefine", type = str,
-        help = "Read file of symbols to be undefined")
+    import argparse
 
-    args, rest = parser.parse_known_args()
-    fh_in = None
-    path_in = "/dev/stdin"
-    for tok in rest:
-        if tok.startswith("-D") and len(tok) > 2:
-            args.D.append(tok[2:])
-        elif tok.startswith("-U") and len(tok) > 2:
-            args.U.append(tok[2:])
-        elif os.path.exists(tok) and os.access(tok, os.R_OK):
-            if fh_in is None:
-                path_in = tok
-                fh_in = open(tok, "r")
-            else:
-                sys.stderr.write("Cannot accept multiple input files")
-                return -1
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-D", action="append", default=[])
+    parser.add_argument("-U", action="append", default=[])
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
 
-    if args.list_macros_define:
-        args.D += get_words_from_file(args.list_macros_define)
+    lines = sys.stdin.read().splitlines()
 
-    if args.list_macros_undefine:
-        args.U += get_words_from_file(args.list_macros_undefine)
-
-    if fh_in is None:
-        fh_in = sys.stdin
-
-
-    if args.patch:
-        path_patch, fh_patch = open_fh_to_write( not(args.no_mkdir), args.dest_dir,
-                                                 args.patch_output if args.patch_output else args.o,
-                                                 None if args.patch_output else args.patch_suffix )
-    else:
-        path_out, fh_out = open_fh_to_write( not(args.no_mkdir), args.dest_dir, args.o, None )
-
-    lines = fh_in.read().splitlines()
-    apple_libc_blocks = collect_apple_libc_blocks(lines)
     objs = parse_lines(lines)
-
-    if not args.analyze_header_guard:
-        guard = detect_header_guard(objs, args.debug)
-        if guard is not None:
-            guard_start, guard_define, guard_end, guard_macro = guard
-            for idx in [guard_start, guard_define, guard_end]:
-                objs[idx].directive   = DirectiveKind.DISABLED
-                objs[idx].local_conds = []
-
     propagate_effective_conds(objs)
 
     if args.debug:
         for lo in objs:
-            local = ",".join(f"{repr(a)}" for a in lo.local_conds)
-            eff   = ",".join(f"{repr(a)}" for a in lo.effective_conds)
-            print(f"[DEBUG] {local:20s} {eff:20s} {lo.text}")
+            print(f"[DEBUG] {lo.text}  →  {lo.effective_cond}")
 
-    source_processed = filter_output_lines(objs, args.D, args.U, apple_libc_blocks)
+    output = filter_output_lines(objs, set(args.D), set(args.U))
 
-    if args.patch:
-        source_original = [lo.text for lo in objs]
-        for line in difflib.unified_diff( source_original,
-                                          source_processed,
-                                          fromfile = path_in,
-                                          tofile = path_in if args.o is None else args.o,
-                                          lineterm = "" ):
-            print(line, file = fh_patch)
-        if fh_patch != sys.stdout:
-            fh_patch.close()
-    else:
-        for line in source_processed:
-            print(line, file = fh_out)
-        if fh_out != sys.stdout:
-            fh_out.close()
+    for line in output:
+        print(line)
 
 if __name__ == "__main__":
     main()
