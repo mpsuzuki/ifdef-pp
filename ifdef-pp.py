@@ -214,7 +214,18 @@ def parse_lines(lines):
 
         elif m := regex_if.match(line):
             lo.directive = DirectiveKind.IF
-            lo.local_cond = CondExpr.Unknown(m.group(1).strip())
+            expr_after_if = m.group(1).strip()
+            if m2 := regex_defined.fullmatch(expr_after_if):
+                macro = m2.group(1)
+                lo.local_cond = CondExpr.atom_expr(CondAtom.neutral(macro))
+            elif m2 := regex_not_defined.fullmatch(expr_after_if):
+                macro = m2.group(1)
+                lo.local_cond = CondExpr.Not(
+                    CondExpr.atom_expr(CondAtom.neutral(macro))
+                )
+            else:
+                lo.local_cond = CondExpr.Unknown(expr_after_if)
+
             lo.related_if = idx
             if_stack.append(idx)
             continue
