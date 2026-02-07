@@ -6,10 +6,13 @@ from enum import Enum, auto
 from typing import Optional, List, Any
 
 # ------------------------------------------------------------
-# CondAtom: represents a single macro condition (pending)
+# CondAtom: AST leaf node for macro names and boolean constants
 # ------------------------------------------------------------
 
 class CondType(Enum):
+    # NEUTRAL: macro name (evaluation depends on -D/-U)
+    # DEFINE/UNDEF: kept for compatibility but not used in new design
+    # CONST_BOOLEAN: literal true/false
     DEFINE  = "D"
     UNDEF   = "U"
     NEUTRAL = "N"
@@ -17,40 +20,30 @@ class CondType(Enum):
 
 @dataclass
 class CondAtom:
+    # kind: CondType
+    # macro: macro name for NEUTRAL/DEFINE/UNDEF
+    #        None for CONST_BOOLEAN
     kind: CondType
-    macro: Optional[str]
+    macro: Optional[str] = None
 
     @classmethod
-    def define(cls, macro):
-        return cls(CondType.DEFINE, macro)
-
-    @classmethod
-    def undef(cls, macro):
-        return cls(CondType.UNDEF, macro)
-
-    @classmethod
-    def neutral(cls, macro):
+    def neutral(cls, macro: str) -> "CondAtom":
+        # AST leaf for macro name
         return cls(CondType.NEUTRAL, macro)
 
-    def __repr__(self):
-        macro = self.macro if self.macro else "*"
-        return f"{self.kind.value}:{macro}"
+    def __repr__(self) -> str:
+        if self.kind == CondType.CONST_BOOLEAN:
+            return "<True>" if self is TRUE_ATOM else "<False>"
+        m = self.macro if self.macro else "*"
+        return f"{self.kind.value}:{m}"
 
 class TrueAtom(CondAtom):
     def __init__(self):
         super().__init__(CondType.CONST_BOOLEAN, None)
-        self.value = True
-
-    def __repr__(self):
-        return "<True>"
 
 class FalseAtom(CondAtom):
     def __init__(self):
         super().__init__(CondType.CONST_BOOLEAN, None)
-        self.value = False
-
-    def __repr__(self):
-        return "<False>"
 
 TRUE_ATOM = TrueAtom()
 FALSE_ATOM = FalseAtom()
@@ -549,36 +542,41 @@ def propagate_effective_conds(objs):
             continue
 
 # ------------------------------------------------------------
-# eval_atom
+# eval_atom (updated for simplified CondAtom)
 # ------------------------------------------------------------
 
 def eval_atom(atom, defined_set, undefined_set):
-    macro = atom.macro
-
+    # CONST_BOOLEAN: literal true/false
     if atom.kind == CondType.CONST_BOOLEAN:
         return TriValue.TRUE if atom is TRUE_ATOM else TriValue.FALSE
 
+    # NEUTRAL: macro name (evaluation depends on -D/-U)
     if atom.kind == CondType.NEUTRAL:
-        if macro in defined_set:
+        name = atom.macro
+        if name in defined_set:
             return TriValue.TRUE
-        if macro in undefined_set:
+        if name in undefined_set:
             return TriValue.FALSE
         return TriValue.PENDING
 
+    # DEFINE/UNDEF are kept for compatibility but not used
     if atom.kind == CondType.DEFINE:
-        if macro in defined_set:
+        name = atom.macro
+        if name in defined_set:
             return TriValue.TRUE
-        if macro in undefined_set:
+        if name in undefined_set:
             return TriValue.FALSE
         return TriValue.PENDING
 
     if atom.kind == CondType.UNDEF:
-        if macro in defined_set:
+        name = atom.macro
+        if name in defined_set:
             return TriValue.FALSE
-        if macro in undefined_set:
+        if name in undefined_set:
             return TriValue.TRUE
         return TriValue.PENDING
 
+    # fallback
     return TriValue.PENDING
 
 # ------------------------------------------------------------
@@ -612,31 +610,41 @@ def eval_expr(expr, defined_set, undefined_set):
 
 
 # ------------------------------------------------------------
-# expr_to_if (minimal)
+# expr_to_if (updated for simplified CondAtom)
 # ------------------------------------------------------------
 
 def expr_to_if(expr):
+    # ATOM: macro name or boolean literal
     if expr.kind.is_atom():
         atom = expr.atom
+
+        # boolean literal
+        if atom.kind == CondType.CONST_BOOLEAN:
+            return "1" if atom is TRUE_ATOM else "0"
+
+        # macro name (pending)
+        if atom.kind == CondType.NEUTRAL:
+            return f"defined({atom.macro}) /* pending */"
+
+        # fallback for DEFINE/UNDEF (kept for compatibility)
         if atom.kind == CondType.DEFINE:
             return f"defined({atom.macro})"
         if atom.kind == CondType.UNDEF:
             return f"!defined({atom.macro})"
-        if atom.kind == CondType.NEUTRAL:
-            return f"defined({atom.macro}) /* pending */"
-        if atom.kind == CondType.CONST_BOOLEAN:
-            return "1" if atom is TRUE_ATOM else "0"
 
+    # NOT
     if expr.kind.is_op_not():
         return f"!({expr_to_if(expr.args[0])})"
 
+    # AND
     if expr.kind.is_op_and():
         return f"({expr_to_if(expr.args[0])} && {expr_to_if(expr.args[1])})"
 
+    # OR
     if expr.kind.is_op_or():
         return f"({expr_to_if(expr.args[0])} || {expr_to_if(expr.args[1])})"
 
-    # here, assume expr.kind.is_unknown()
+    # UNKNOWN or unsupported
     return f"/* {expr.args[0]} */"
 
 # ------------------------------------------------------------
