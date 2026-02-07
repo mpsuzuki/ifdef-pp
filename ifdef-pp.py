@@ -10,8 +10,6 @@ from typing import Optional, List, Any
 # ------------------------------------------------------------
 
 class CondType(Enum):
-    DEFINE  = "D"
-    UNDEF   = "U"
     NEUTRAL = "N"
     CONST_BOOLEAN = "B"
 
@@ -19,14 +17,7 @@ class CondType(Enum):
 class CondAtom:
     kind: CondType
     macro: Optional[str]
-
-    @classmethod
-    def define(cls, macro):
-        return cls(CondType.DEFINE, macro)
-
-    @classmethod
-    def undef(cls, macro):
-        return cls(CondType.UNDEF, macro)
+    value: Optional[int] = None
 
     @classmethod
     def neutral(cls, macro):
@@ -565,20 +556,6 @@ def eval_atom(atom, defined_set, undefined_set):
             return TriValue.FALSE
         return TriValue.PENDING
 
-    if atom.kind == CondType.DEFINE:
-        if macro in defined_set:
-            return TriValue.TRUE
-        if macro in undefined_set:
-            return TriValue.FALSE
-        return TriValue.PENDING
-
-    if atom.kind == CondType.UNDEF:
-        if macro in defined_set:
-            return TriValue.FALSE
-        if macro in undefined_set:
-            return TriValue.TRUE
-        return TriValue.PENDING
-
     return TriValue.PENDING
 
 # ------------------------------------------------------------
@@ -618,10 +595,6 @@ def eval_expr(expr, defined_set, undefined_set):
 def expr_to_if(expr):
     if expr.kind.is_atom():
         atom = expr.atom
-        if atom.kind == CondType.DEFINE:
-            return f"defined({atom.macro})"
-        if atom.kind == CondType.UNDEF:
-            return f"!defined({atom.macro})"
         if atom.kind == CondType.NEUTRAL:
             return f"defined({atom.macro}) /* pending */"
         if atom.kind == CondType.CONST_BOOLEAN:
