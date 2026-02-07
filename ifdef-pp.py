@@ -65,6 +65,8 @@ class CondExprKind(Enum):
     NOT  = auto()
     AND  = auto()
     OR   = auto()
+    CONST = auto()
+    COMPARE = auto()
 
     def is_atom(self): return self == CondExprKind.ATOM
     def is_unknown(self): return self == CondExprKind.UNKNOWN
@@ -101,6 +103,14 @@ class CondExpr:
     @classmethod
     def Or(cls, a, b):
         return cls(CondExprKind.OR, args = [a, b])
+
+    @classmethod
+    def Const(cls, value: int):
+        return cls(CondExprKind.CONST, args = [value])
+
+    @classmethod
+    def Compare(cls, op, lhs, rhs):
+        return cls(CondExprKind.COMPARE, args = [op, lhs, rhs])
 
     @classmethod
     def Unknown(cls, text):
