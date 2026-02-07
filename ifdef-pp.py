@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import re
 import sys
+import difflib
+from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, List, Any
@@ -785,25 +787,103 @@ def collect_apple_libc_blocks(lines):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-D", action="append", default=[])
-    parser.add_argument("-U", action="append", default=[])
-    parser.add_argument("--debug", action="store_true")
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(
+        formatter_class = argparse.RawTextHelpFormatter
+    )
+    parser.add_argument("-D", action = "append", default = [],
+                        help = "Define macro")
+    parser.add_argument("-U", action = "append", default = [],
+                        help = "Undefine macro")
+    parser.add_argument("-o", type = str, default = None,
+                        help = "Write output to <pathname>")
+    parser.add_argument("--dest-dir", "--destdir", type = str, default = None,
+        help = "Set DESTDIR to emit output files")
+    parser.add_argument("--debug", action = "store_true",
+        help = "Debug mode")
+    parser.add_argument("--patch", action = "store_true",
+        help = "Emit as an unified patch")
+    parser.add_argument("--patch-output", type = str,
+        help = "Emit unified patch output to file")
+    parser.add_argument("--patch-suffix", type = str, default = ".diff",
+        help = "Set suffix for patch output")
+    parser.add_argument("--no-mkdir", action = "store_true",
+        help = "Do not make parental directories during output")
+    parser.add_argument("--analyze-header-guard", action = "store_true",
+        help = "Treat header guards (#ifndef X, #define X, #endif) as normal conditions.\n"
+               "By default, macros used in header guards cannot be defined by -D.")
+    parser.add_argument("--list-macros-define", type = str,
+        help = "Read file of symbols to be defined")
+    parser.add_argument("--list-macros-undefine", type = str,
+        help = "Read file of symbols to be undefined")
 
-    lines = sys.stdin.read().splitlines()
+    args, rest = parser.parse_known_args()
+    fh_in = None
+    path_in = "/dev/stdin"
+    for tok in rest:
+        if tok.startswith("-D") and len(tok) > 2:
+            args.D.append(tok[2:])
+        elif tok.startswith("-U") and len(tok) > 2:
+            args.U.append(tok[2:])
+        elif os.path.exists(tok) and os.access(tok, os.R_OK):
+            if fh_in is None:
+                path_in = tok
+                fh_in = open(tok, "r")
+            else:
+                sys.stderr.write("Cannot accept multiple input files")
+                return -1
 
+    if args.list_macros_define:
+        args.D += get_words_from_file(args.list_macros_define)
+
+    if args.list_macros_undefine:
+        args.U += get_words_from_file(args.list_macros_undefine)
+
+    if fh_in is None:
+        fh_in = sys.stdin
+
+
+    if args.patch:
+        path_patch, fh_patch = open_fh_to_write( not(args.no_mkdir), args.dest_dir,
+                                                 args.patch_output if args.patch_output else args.o,
+                                                 None if args.patch_output else args.patch_suffix )
+    else:
+        path_out, fh_out = open_fh_to_write( not(args.no_mkdir), args.dest_dir, args.o, None )
+
+    lines = fh_in.read().splitlines()
+    apple_libc_blocks = collect_apple_libc_blocks(lines)
     objs = parse_lines(lines)
+
+    if not args.analyze_header_guard:
+        guard = detect_header_guard(objs, args.debug)
+        if guard is not None:
+            guard_start, guard_define, guard_end, guard_macro = guard
+            for idx in [guard_start, guard_define, guard_end]:
+                objs[idx].directive   = DirectiveKind.DISABLED
+                objs[idx].local_conds = []
+
     propagate_effective_conds(objs)
 
     if args.debug:
         for lo in objs:
             print(f"[DEBUG] {lo.text}  →  {lo.effective_cond}")
 
-    output = filter_output_lines(objs, set(args.D), set(args.U))
+    source_processed = filter_output_lines(objs, args.D, args.U, apple_libc_blocks)
 
-    for line in output:
-        print(line)
+    if args.patch:
+        source_original = [lo.text for lo in objs]
+        for line in difflib.unified_diff( source_original,
+                                          source_processed,
+                                          fromfile = path_in,
+                                          tofile = path_in if args.o is None else args.o,
+                                          lineterm = "" ):
+            print(line, file = fh_patch)
+        if fh_patch != sys.stdout:
+            fh_patch.close()
+    else:
+        for line in source_processed:
+            print(line, file = fh_out)
+        if fh_out != sys.stdout:
+            fh_out.close()
 
 if __name__ == "__main__":
     main()
