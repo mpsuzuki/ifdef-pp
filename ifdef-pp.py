@@ -653,6 +653,94 @@ def postprocess_repair_structure(objs, removed):
 # main
 # ------------------------------------------------------------
 
+def detect_header_guard(objs, debug = False):
+    if debug:
+        print("start detect_header_guard()")
+
+    # lookup last endif
+    endif_idx = None
+    for i in reversed(range(len(objs))):
+        if objs[i].is_directive_endif():
+            endif_idx = i
+            break
+
+    if endif_idx is None:
+        return None
+
+    if debug:
+        print(f"detect_header_guard: last endif is at {endif_idx}")
+
+    endif_obj = objs[endif_idx]
+
+    # if no related_if for the last endif, the source is broken
+    if endif_obj.related_if is None:
+        return None
+
+    if_idx = endif_obj.related_if
+    if_obj = objs[if_idx]
+
+    if debug:
+        print(f"detect_header_guard: condition starts at {if_idx}")
+
+    # confirm related pp is '#ifndef X' or '#if !defined(X)'
+    if if_obj.directive not in (DirectiveKind.IFNDEF, DirectiveKind.IF):
+        return None
+
+    if debug:
+        print(f"detect_header_guard: {if_idx} is '#ifndef' or '#if defined'")
+
+    # extract a macro used for header guard
+    #   confirm local_conds has one macro only
+    local_macros = if_obj.local_cond.macros()
+    if len(local_macros) != 1:
+        return None
+
+    macro = local_macros[0]
+
+    if debug:
+        print(f"detect_header_guard: {macro} is header guard macro")
+
+    # lookup next pp after first #ifndef or #if !defined()
+    regex_cpp_directive = re.compile(r'^\s*#\s*([A-Za-z_]\w*)')
+
+    j = if_idx + 1
+    while j < len(objs) and not regex_cpp_directive.match(objs[j].text):
+        j += 1
+
+    if j >= len(objs):
+        return None
+
+    if debug:
+        print(f"detect_header_guard: {macro} might be redefined at {j}")
+
+    # confirm the 2nd pp defines the macro used for header guard
+    regex_define_macro = re.compile(r'^\s*#\s*define\s+([A-Za-z_]\w*)')
+    m = regex_define_macro.match(objs[j].text)
+    if m is None:
+        return None
+
+    if m.group(1) != macro:
+        return None
+
+    define_idx = j
+
+    if debug:
+        print(f"detect_header_guard: {macro} is confirmed to be redefined at {j}")
+
+    # confirm first #ifndef or #if !defined(X) is the first pp.
+    for k in range(if_idx):
+        if objs[k].directive is not DirectiveKind.NONE:
+            # if there is earlier pp, this might not be header guard.
+            if debug:
+                print(f"detect_header_guard: first cpp directive is found at {k}")
+            return None
+
+    if debug:
+        print(f"detect_header_guard: {if_idx} is confirmed to be the first cpp directive")
+
+    # decide this is header guard.
+    return (if_idx, define_idx, endif_idx, macro)
+
 def main():
     import argparse
 
