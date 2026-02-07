@@ -741,6 +741,15 @@ def detect_header_guard(objs, debug = False):
     # decide this is header guard.
     return (if_idx, define_idx, endif_idx, macro)
 
+def get_words_from_file(path_file):
+    words = []
+    with open(path_file, "r") as fh:
+        for line in fh.read().splitlines():
+            tok = re.sub(r"#.*", "", line).strip()
+            if tok:
+                words.append(tok)
+    return words
+
 def main():
     import argparse
 
