@@ -768,6 +768,20 @@ def open_fh_to_write(do_mkdir, str_dest_dir, str_path, file_suffix):
     print(f"# write {pth}", file = sys.stderr)
     return ( str(pth), fh )
 
+def collect_apple_libc_blocks(lines):
+    regex_begin_libc = re.compile(r"^\s*//\s*Begin-Libc\s*$")
+    regex_end_libc   = re.compile(r"^\s*//\s*End-Libc\s*$")
+    blocks = []
+    for idx, line in enumerate(lines):
+        if regex_begin_libc.match(line):
+            blocks.append( AppleLibcBlock(idx, None, True) )
+        elif regex_end_libc.match(line):
+            if blocks[-1].end_libc:
+                blocks.append( AppleLibcBlock(None, None, True) )
+            blocks[-1].end_libc = idx
+    blocks = [blk for blk in blocks if blk.begin_libc and blk.end_libc]
+    return blocks
+
 def main():
     import argparse
 
