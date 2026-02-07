@@ -85,3 +85,58 @@ refused or warned if users try to set them externally.
 
 Currently, ifdef-pp.py cannot detect whether the pp directives
 appearing in the middle of the comments or string constants.
+
+### Purpose and Evaluation Model
+
+This tool is *not* an implementation of the C preprocessor,
+nor does it attempt to reproduce its exact behavior.
+Instead, it evaluates conditional directives using a
+*custom three‑valued logic* designed for partial macro
+information.
+
+The tool distinguishes three states for each macro:
+
+* defined — explicitly specified by the user via -D
+* undefined — explicitly specified by the user via -U
+* pending — not specified by the user;
+	its truth value is unknown
+
+This third state (pending) does not exist
+in the real C preprocessor, but it is essential
+for this tool.
+
+#### Key principles
+1. Pending is a first‑class state.
+
+If a macro is neither in the defined set nor in
+the undefined set, its value must remain pending.
+
+2. The goal is simplification, not full evaluation.
+
+The tool simplifies conditional blocks only when
+the result is unambiguously true or false.
+If the result depends on a pending macro,
+the corresponding `#if` structure must be preserved.
+
+3. Do not apply normal C preprocessor rules.
+
+* Do not assume undefined macros evaluate to 0.
+* Do not collapse expressions using C’s short‑circuit
+	rules unless the result is fully determined.
+* Do not attempt to fully evaluate expressions
+	involving pending macros.
+
+4. Three‑valued logic is used for all expressions.
+Operators (`&&`, `||`, `!`) propagate pending values
+unless the result is forced to true or false.
+
+#### Summary
+This tool operates under a custom evaluation model:
+
+* It simplifies what can be simplified based
+	on user‑provided macro information.
+* It preserves conditional structures when
+	the truth value cannot be determined.
+* It must not behave like a full C preprocessor.
+
+All reasoning about conditions must follow this model.
