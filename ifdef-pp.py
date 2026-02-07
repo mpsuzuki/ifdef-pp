@@ -431,17 +431,20 @@ def parse_lines(lines):
 
         elif m := regex_if.match(line):
             lo.directive = DirectiveKind.IF
-            expr_after_if = m.group(1).strip()
-            if m2 := regex_defined.fullmatch(expr_after_if):
+            str_after_if = m.group(1).strip()
+            if m2 := regex_defined.fullmatch(str_after_if):
                 macro = m2.group(1)
                 lo.local_cond = CondExpr.atom_expr(CondAtom.neutral(macro))
-            elif m2 := regex_not_defined.fullmatch(expr_after_if):
+            elif m2 := regex_not_defined.fullmatch(str_after_if):
                 macro = m2.group(1)
                 lo.local_cond = CondExpr.Not(
                     CondExpr.atom_expr(CondAtom.neutral(macro))
                 )
             else:
-                lo.local_cond = CondExpr.Unknown(expr_after_if)
+                try:
+                    lo.local_cond = parse_expr_from_str(str_after_if)
+                except Exception:
+                    lo.local_cond = CondExpr.Unknown(str_after_if)
 
             lo.related_if = idx
             if_stack.append(idx)
@@ -465,7 +468,11 @@ def parse_lines(lines):
         elif m := regex_elif.match(line):
             lo.directive = DirectiveKind.ELIF
             resolve_parent_if(lo, if_stack, objs, idx)
-            lo.local_cond = CondExpr.Unknown(m.group(1).strip())
+            str_after_elif = m.group(1).strip()
+            try:
+                lo.local_cond = parse_expr_from_str(str_after_elif)
+            except Exception:
+                lo.local_cond = CondExpr.Unknown(str_after_elif)
             continue
 
         elif regex_else.match(line):
