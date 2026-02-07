@@ -141,14 +141,15 @@ class TriValue(Enum):
 # ------------------------------------------------------------
 
 class DirectiveKind(Enum):
-    NONE     = auto()
-    PP_MISC  = auto()
-    IF       = auto()
-    IFDEF    = auto()
-    IFNDEF   = auto()
-    ELIF     = auto()
-    ELSE     = auto()
-    ENDIF    = auto()
+    NONE     = auto()	# normal content, not pp-directive
+    DISABLED = auto()	# pp-directive but do not process (like header guard)
+    PP_MISC  = auto()	# pp-directive but unknown/unsupported currently
+    IF       = auto()	# if
+    IFDEF    = auto()	# ifdef
+    IFNDEF   = auto()	# ifndef
+    ELIF     = auto()	# elif
+    ELSE     = auto()	# else
+    ENDIF    = auto()	# endif
 
 @dataclass
 class LineObj:
