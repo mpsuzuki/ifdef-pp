@@ -20,6 +20,9 @@ class CondAtom:
     kind: CondType
     macro: Optional[str]
 
+    def is_const(self):
+        return (self.kind == CondType.CONST_BOOLEAN)
+
     @classmethod
     def define(cls, macro):
         return cls(CondType.DEFINE, macro)
