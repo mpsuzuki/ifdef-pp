@@ -116,6 +116,208 @@ class CondExpr:
     def Unknown(cls, text):
         return cls(CondExprKind.UNKNOWN, args = [text])
 
+
+# ------------------------------------------------------------
+# Token kinds
+# ------------------------------------------------------------
+
+class TokenKind(Enum):
+    IDENT = "IDENT"
+    NUMBER = "NUMBER"
+    DEFINED = "DEFINED"
+    NOT = "!"
+    AND = "&&"
+    OR = "||"
+    EQ = "=="
+    LT = "<"
+    GT = ">"
+    LPAREN = "("
+    RPAREN = ")"
+    END = "END"
+
+
+@dataclass
+class Token:
+    kind: TokenKind
+    value: Any = None
+
+# ------------------------------------------------------------
+# Lexer
+# ------------------------------------------------------------
+
+def tokenize(expr: str) -> List[Token]:
+    """
+    Simple hand-written lexer.
+    This design allows easy replacement with pyparsing later.
+    """
+    tokens = []
+    i = 0
+    n = len(expr)
+
+    while i < n:
+        c = expr[i]
+
+        # skip spaces
+        if c.isspace():
+            i += 1
+            continue
+
+        # multi-char operators
+        if expr.startswith("&&", i):
+            tokens.append(Token(TokenKind.AND))
+            i += 2
+            continue
+        if expr.startswith("||", i):
+            tokens.append(Token(TokenKind.OR))
+            i += 2
+            continue
+        if expr.startswith("==", i):
+            tokens.append(Token(TokenKind.EQ))
+            i += 2
+            continue
+
+        # single-char operators
+        if c == '!':
+            tokens.append(Token(TokenKind.NOT))
+            i += 1
+            continue
+        if c == '<':
+            tokens.append(Token(TokenKind.LT))
+            i += 1
+            continue
+        if c == '>':
+            tokens.append(Token(TokenKind.GT))
+            i += 1
+            continue
+        if c == '(':
+            tokens.append(Token(TokenKind.LPAREN))
+            i += 1
+            continue
+        if c == ')':
+            tokens.append(Token(TokenKind.RPAREN))
+            i += 1
+            continue
+
+        # defined keyword
+        if expr.startswith("defined", i):
+            tokens.append(Token(TokenKind.DEFINED))
+            i += len("defined")
+            continue
+
+        # identifier
+        if c.isalpha() or c == '_':
+            j = i + 1
+            while j < n and (expr[j].isalnum() or expr[j] == '_'):
+                j += 1
+            ident = expr[i:j]
+            tokens.append(Token(TokenKind.IDENT, ident))
+            i = j
+            continue
+
+        # number
+        if c.isdigit():
+            j = i + 1
+            while j < n and expr[j].isdigit():
+                j += 1
+            num = int(expr[i:j])
+            tokens.append(Token(TokenKind.NUMBER, num))
+            i = j
+            continue
+
+        raise ValueError("Unexpected character: " + c)
+
+    tokens.append(Token(TokenKind.END))
+    return tokens
+
+# ------------------------------------------------------------
+# Recursive descent parser
+# ------------------------------------------------------------
+
+class Parser:
+    """
+    Hand-written parser for (1) and (2).
+    This structure can be replaced by pyparsing later.
+    """
+
+    def __init__(self, tokens):
+        self.tokens = tokens
+        self.pos = 0
+
+    def peek(self):
+        return self.tokens[self.pos]
+
+    def consume(self, kind):
+        tok = self.peek()
+        if tok.kind != kind:
+            raise ValueError("Expected " + str(kind) + ", got " + str(tok.kind))
+        self.pos += 1
+        return tok
+
+    # expr -> or_expr
+    def parse_expr(self):
+        return self.parse_or()
+
+    # or_expr -> and_expr ("||" and_expr)*
+    def parse_or(self):
+        node = self.parse_and()
+        while self.peek().kind == TokenKind.OR:
+            self.consume(TokenKind.OR)
+            rhs = self.parse_and()
+            node = CondExpr.Or(node, rhs)
+        return node
+
+    # and_expr -> not_expr ("&&" not_expr)*
+    def parse_and(self):
+        node = self.parse_not()
+        while self.peek().kind == TokenKind.AND:
+            self.consume(TokenKind.AND)
+            rhs = self.parse_not()
+            node = CondExpr.And(node, rhs)
+        return node
+
+    # not_expr -> "!" not_expr | compare_expr
+    def parse_not(self):
+        if self.peek().kind == TokenKind.NOT:
+            self.consume(TokenKind.NOT)
+            return CondExpr.Not(self.parse_not())
+        return self.parse_compare()
+
+    # compare_expr -> primary (("==" | "<" | ">") primary)*
+    def parse_compare(self):
+        node = self.parse_primary()
+        while self.peek().kind in (TokenKind.EQ, TokenKind.LT, TokenKind.GT):
+            op = self.consume(self.peek().kind).kind
+            rhs = self.parse_primary()
+            node = CondExpr.Compare(op, node, rhs)
+        return node
+
+    # primary -> defined(...) | IDENT | NUMBER | "(" expr ")"
+    def parse_primary(self):
+        tok = self.peek()
+
+        if tok.kind == TokenKind.DEFINED:
+            self.consume(TokenKind.DEFINED)
+            self.consume(TokenKind.LPAREN)
+            ident = self.consume(TokenKind.IDENT).value
+            self.consume(TokenKind.RPAREN)
+            return CondExpr.atom_expr(CondAtom.neutral(ident))
+
+        if tok.kind == TokenKind.IDENT:
+            ident = self.consume(TokenKind.IDENT).value
+            return CondExpr.atom_expr(CondAtom.neutral(ident))
+
+        if tok.kind == TokenKind.NUMBER:
+            num = self.consume(TokenKind.NUMBER).value
+            return CondExpr.Const(num)
+
+        if tok.kind == TokenKind.LPAREN:
+            self.consume(TokenKind.LPAREN)
+            node = self.parse_expr()
+            self.consume(TokenKind.RPAREN)
+            return node
+
+        raise ValueError("Unexpected token: " + str(tok))
+
 # ------------------------------------------------------------
 # TriValue: 3-valued logic
 # ------------------------------------------------------------
@@ -199,6 +401,11 @@ def resolve_parent_if(lo, if_stack, objs, idx):
 # ------------------------------------------------------------
 # parse_lines
 # ------------------------------------------------------------
+
+def parse_expr_from_str(expr: str) -> CondExpr:
+    tokens = tokenize(expr)
+    parser = Parser(tokens)
+    return parser.parse_expr()
 
 def parse_lines(lines):
     objs = []
