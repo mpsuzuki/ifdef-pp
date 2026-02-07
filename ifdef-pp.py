@@ -750,6 +750,24 @@ def get_words_from_file(path_file):
                 words.append(tok)
     return words
 
+def open_fh_to_write(do_mkdir, str_dest_dir, str_path, file_suffix):
+    if str_path in [None, "-", 0, "stdout", "/dev/stdout", sys.stdout]:
+        return ("/dev/stdout", sys.stdout)
+    elif file_suffix:
+        pth = Path( str_path + file_suffix )
+    else:
+        pth = Path( str_path )
+
+    if str_dest_dir:
+        pth = Path( str_dest_dir ) / pth
+
+    if do_mkdir:
+        pth.parent.mkdir( parents = True, exist_ok = True )
+
+    fh = open( pth, "w" )
+    print(f"# write {pth}", file = sys.stderr)
+    return ( str(pth), fh )
+
 def main():
     import argparse
 
