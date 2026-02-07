@@ -81,6 +81,20 @@ class CondExpr:
     atom: Optional[CondAtom] = None
     args: Optional[List[Any]] = None
 
+    def macros(self):
+        macros = []
+        if self.kind.is_unknown():
+            pass
+        elif self.kind.is_atom() and not self.atom.is_const():
+            macros.append(self.atom.macro)
+        else:
+            for a in self.args:
+                if instanceof(a, CondExpr):
+                    macros.extend(a.macros())
+                elif instanceof(a, CondAtom) and not a.is_const():
+                    macros.append(a.macro)
+        return macros
+
     @classmethod
     def atom_expr(cls, atom):
         return cls(CondExprKind.ATOM, atom=atom)
