@@ -86,7 +86,7 @@ refused or warned if users try to set them externally.
 Currently, ifdef-pp.py cannot detect whether the pp directives
 appearing in the middle of the comments or string constants.
 
-### Purpose and Evaluation Model
+# Purpose and Evaluation Model
 
 This tool is *not* an implementation of the C preprocessor,
 nor does it attempt to reproduce its exact behavior.
@@ -105,7 +105,7 @@ This third state (pending) does not exist
 in the real C preprocessor, but it is essential
 for this tool.
 
-#### Key principles
+## Key principles
 1. Pending is a first‑class state.
 
 If a macro is neither in the defined set nor in
@@ -130,7 +130,7 @@ the corresponding `#if` structure must be preserved.
 Operators (`&&`, `||`, `!`) propagate pending values
 unless the result is forced to true or false.
 
-#### Summary
+## Summary
 This tool operates under a custom evaluation model:
 
 * It simplifies what can be simplified based
