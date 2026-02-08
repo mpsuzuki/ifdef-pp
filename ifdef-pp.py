@@ -47,7 +47,7 @@ class TrueAtom(CondAtom):
         self.value = True
 
     def __repr__(self):
-        return "<True>"
+        return "T"
 
 class FalseAtom(CondAtom):
     def __init__(self):
@@ -55,7 +55,7 @@ class FalseAtom(CondAtom):
         self.value = False
 
     def __repr__(self):
-        return "<False>"
+        return "F"
 
 TRUE_ATOM = TrueAtom()
 FALSE_ATOM = FalseAtom()
@@ -76,6 +76,32 @@ class CondExprKind(Enum):
     def is_op_not(self): return self == CondExprKind.NOT
     def is_op_and(self): return self == CondExprKind.AND
     def is_op_or(self): return self == CondExprKind.OR
+
+regex_T_and_x = re.compile(r'^\(T\&\&(.+)\)$')
+regex_F_and_x = re.compile(r'^\(F\&\&(.+)\)$')
+regex_x_and_T = re.compile(r'^\((.+)\&\&T\)$')
+regex_x_and_F = re.compile(r'^\((.+)\&\&F\)$')
+regex_T_or_x = re.compile(r'^\(T\|\|(.+)\)$')
+regex_F_or_x = re.compile(r'^\(F\|\|(.+)\)$')
+regex_x_or_T = re.compile(r'^\((.+)\|\|T\)$')
+regex_x_or_F = re.compile(r'^\((.+)\|\|F\)$')
+def trim_const_boolean(str_expr):
+    s = str_expr.strip()
+    if m := regex_T_and_x.fullmatch(s):
+        return m.group(1)
+    elif m := regex_x_and_T.fullmatch(s):
+        return m.group(1)
+    elif regex_F_and_x.fullmatch(s) or regex_x_and_F.fullmatch(s):
+        return "F"
+    elif regex_T_or_x.fullmatch(s) or regex_x_or_T.fullmatch(s):
+        return "T"
+    elif m := regex_F_or_x.fullmatch(s):
+        return m.group(1)
+    elif m := regex_x_or_F.fullmatch(s):
+        return m.group(1)
+    else:
+        return s
+    
 
 @dataclass
 class CondExpr:
@@ -124,6 +150,22 @@ class CondExpr:
     @classmethod
     def Unknown(cls, text):
         return cls(CondExprKind.UNKNOWN, args = [text])
+
+    def __repr__(self):
+        if self.kind.is_unknown():
+            return f"?:{self.args[0]}"
+        if self.kind.is_atom():
+            return repr(self.atom)
+        if self.kind.is_op_not():
+            return f"!{repr(self.args[0])}"
+        if self.kind.is_op_and():
+            return trim_const_boolean(
+                f"({repr(self.args[0])}&&{repr(self.args[1])})"
+            )
+        if self.kind.is_op_or():
+            return trim_const_boolean(
+                f"({repr(self.args[0])}||{repr(self.args[1])})"
+            )
 
 # ------------------------------------------------------------
 # TriValue: 3-valued logic
