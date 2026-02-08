@@ -164,8 +164,17 @@ class LineObj:
     def is_directive_if(self): return self.directive == DirectiveKind.IF
     def is_directive_ifdef(self): return self.directive == DirectiveKind.IFDEF
     def is_directive_ifndef(self): return self.directive == DirectiveKind.IFNDEF
+    def is_directive_iflike(self):
+        return self.directive in ( DirectiveKind.IF,
+                                   DirectiveKind.IFDEF,
+                                   DirectiveKind.IFNDEF)
     def is_directive_elif(self): return self.directive == DirectiveKind.ELIF
     def is_directive_else(self): return self.directive == DirectiveKind.ELSE
+    def is_directive_elselike(self):
+        return self.directive in ( DirectiveKind.ELIF,
+                                   DirectiveKind.ELSE )
+    def is_directive_conditional_entry(self):
+        return self.is_directive_iflike() or self.is_directive_elselike()
     def is_directive_endif(self): return self.directive == DirectiveKind.ENDIF
     def is_directive_none(self): return self.directive == DirectiveKind.NONE
     def is_directive_pp_misc(self): return self.directive == DirectiveKind.PP_MISC
@@ -310,7 +319,7 @@ def propagate_effective_conds(objs):
             lo.effective_cond = current_effective
             continue
 
-        if lo.is_directive_if() or lo.is_directive_ifdef() or lo.is_directive_ifndef():
+        if lo.is_directive_iflike():
             cond_if = lo.local_cond or CondExpr.true()
             lo.effective_cond = CondExpr.And(current_effective, cond_if)
 
@@ -452,11 +461,11 @@ def collect_if_chains(objs):
     stack = []
 
     for idx, lo in enumerate(objs):
-        if lo.is_directive_if() or lo.is_directive_ifdef() or lo.is_directive_ifndef():
+        if lo.is_directive_iflike():
             chains[idx] = {"branches": [idx], "end": None}
             stack.append(idx)
 
-        elif lo.is_directive_elif() or lo.is_directive_else():
+        elif lo.is_directive_elselike():
             parent = lo.related_if
             if parent in chains:
                 chains[parent]["branches"].append(idx)
@@ -534,12 +543,12 @@ def compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove):
         if idx in idx_to_remove:
             continue
 
-        if lo.is_directive_if() or lo.is_directive_ifdef() or lo.is_directive_ifndef():
+        if lo.is_directive_iflike():
             expr = lo.effective_cond or CondExpr.true()
             v = eval_expr(expr, defined_set, undefined_set)
             if_chain_pending[idx] = (v == TriValue.PENDING)
 
-        elif lo.is_directive_elif() or lo.is_directive_else():
+        elif lo.is_directive_elselike():
             parent_idx = lo.related_if
             if parent_idx is not None and parent_idx in if_chain_pending:
                 expr = lo.effective_cond or CondExpr.true()
@@ -554,13 +563,7 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, id
             continue
 
         # Directives use local_cond; normal lines use effective_cond
-        if (
-            lo.is_directive_if()
-            or lo.is_directive_ifdef()
-            or lo.is_directive_ifndef()
-            or lo.is_directive_elif()
-            or lo.is_directive_else()
-        ):
+        if lo.is_directive_conditional_entry():
             expr = lo.local_cond or CondExpr.true()
         else:
             expr = lo.effective_cond or CondExpr.true()
@@ -579,13 +582,7 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, id
             continue
 
         # 2) Remove directive lines that are fully TRUE (except #endif)
-        if v.is_true() and not parent_pending and (
-            lo.is_directive_if()
-            or lo.is_directive_ifdef()
-            or lo.is_directive_ifndef()
-            or lo.is_directive_elif()
-            or lo.is_directive_else()
-        ):
+        if v.is_true() and not parent_pending and lo.is_directive_conditional_entry():
             idx_to_remove.add(idx)
             continue
 
