@@ -348,10 +348,10 @@ def parse_lines(lines):
     return objs
 
 # ------------------------------------------------------------
-# propagate_effective_conds
+# propagate_effective_cond
 # ------------------------------------------------------------
 
-def propagate_effective_conds(objs):
+def propagate_effective_cond(objs):
     current_effective = CondExpr.true()
     stack = []
 
@@ -900,7 +900,7 @@ def main():
                 objs[idx].directive   = DirectiveKind.DISABLED
                 objs[idx].local_conds = []
 
-    propagate_effective_conds(objs)
+    propagate_effective_cond(objs)
 
     if args.debug:
         for lo in objs:
