@@ -669,6 +669,12 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, id
     for idx, lo in enumerate(objs):
         lo.debug["inactive_branch"] = "T" if idx in idx_to_remove else "F"
 
+def max_width(itr):
+    return max(len(s) for s in itr)
+
+def debug_column_width(objs, k):
+    return max_width(lo.debug[k] for lo in objs)
+
 def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[], debug = False):
     if debug:
         print("===== OBJS DUMP =====")
@@ -695,7 +701,7 @@ def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[], 
     remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, idx_to_remove)
 
     if debug:
-        max_width_eff = max( len(lo.debug["effective_cond"]) for lo in objs )
+        max_width_eff = debug_column_width(objs, "effective_cond")
         for lo in objs:
             if lo.debug['inactive_branch'] == 'T':
                 str_act_color = '\033[31mx\033[0m'
