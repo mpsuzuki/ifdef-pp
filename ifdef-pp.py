@@ -715,13 +715,21 @@ def max_width(itr):
 def debug_column_width(objs, k):
     return max_width(lo.debug[k] for lo in objs)
 
+def directive_column_width(objs):
+    return max_width(repr(lo.directive) for lo in objs)
+
 def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[], debug = False):
     if debug:
         print("===== OBJS DUMP =====")
+        max_width_dir = directive_column_width(objs)
+        s_clr256_rst = ppdir_color256(None)
         for i, lo in enumerate(objs):
-            # print(f"[{i:03}] {lo.text.rstrip()}   dir={lo.directive}   related_if={lo.related_if}")
-            s_related_if = f"{lo.related_if:03}" if lo.related_if else "   "
-            print(f"[{i:03}] dir={repr(lo.directive):13s} related_if={s_related_if} {lo.text.rstrip()}")
+            s_related_if = f"{lo.related_if:03}" if lo.related_if else "_"
+            s_clr256 = ppdir_color256(lo.directive)
+            print(f"[{i:03}] "
+                  f"dir={s_clr256}{repr(lo.directive):{max_width_dir}s}{s_clr256_rst} "
+                  f"related_if={s_related_if} "
+                  f"    {lo.text.rstrip()}")
         print("======================")
 
     idx_to_remove = set()
