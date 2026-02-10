@@ -180,6 +180,25 @@ class TriValue(Enum):
     def is_false(self): return self == TriValue.FALSE
     def is_pending(self): return self == TriValue.PENDING
 
+regex_color_hex = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+def parse_hex_color(s):
+    if not regex_color_hex.match(s):
+        raise SyntaxError(f"{s} does not fit to hexadecimal color code")
+    s = s[1:]
+    if len(s) != 6:
+        raise ValueError("hex color must be 6 hex digits")
+    return int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+
+def color_hex_to_ansi_256(s):
+    r, g, b = parse_hex_color(s)
+    n = 16 + 36 * (r // 51) + 6 * (g // 51) + (b // 51)
+    return f"\033[38;5;{n:03d}m"
+
+def color_hex_to_ansi_rgb(s):
+    r, g, b = parse_hex_color(s)
+    return f"\033[38;2;{r:03d};{g:03d};{b:03d}m"
+
 # ------------------------------------------------------------
 # LineObj: represents one line of source
 # ------------------------------------------------------------
@@ -206,6 +225,27 @@ class DirectiveKind(Enum):
         if self == DirectiveKind.ELSE:   return "#else"
         if self == DirectiveKind.ENDIF:  return "#endif"
         return "<unknown>"
+
+DEFAULT_COLORS = {
+    None:                   "\033[0m",
+    DirectiveKind.NONE:     "#000000",
+    DirectiveKind.DISABLED: "#333300",
+    DirectiveKind.PP_MISC:  "#CCCC99",
+    DirectiveKind.IF:       "#00CC99",
+    DirectiveKind.IFDEF:    "#009999",
+    DirectiveKind.IFNDEF:   "#009966",
+    DirectiveKind.ELIF:     "#99CC33",
+    DirectiveKind.ELSE:     "#FF00FF",
+    DirectiveKind.ENDIF:    "#CC3366"
+}
+
+def ppdir_color256(pp_dir, color_dic = DEFAULT_COLORS):
+    if pp_dir is None:
+        return DEFAULT_COLORS[None]
+    elif pp_dir in color_dic:
+        return color_hex_to_ansi_256(color_dic[pp_dir])
+    else:
+        return DEFAULT_COLORS[None]
 
 @dataclass
 class LineObj:
