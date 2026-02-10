@@ -3,7 +3,7 @@ import re
 import sys
 import difflib
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Optional, List, Any
 
