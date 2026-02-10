@@ -198,6 +198,7 @@ class DirectiveKind(Enum):
 @dataclass
 class LineObj:
     text: str
+    debug: dict = field(default_factory=dict)
     directive: DirectiveKind = DirectiveKind.NONE
     related_if: Optional[int] = None
     local_cond: Optional[CondExpr] = None
@@ -359,9 +360,8 @@ def propagate_effective_cond(objs):
 
         if lo.is_directive_none() or lo.is_directive_pp_misc():
             lo.effective_cond = current_effective
-            continue
 
-        if lo.is_directive_iflike():
+        elif lo.is_directive_iflike():
             cond_if = lo.local_cond or CondExpr.true()
             lo.effective_cond = CondExpr.And(current_effective, cond_if)
 
@@ -369,9 +369,8 @@ def propagate_effective_cond(objs):
             stack.append(frame)
 
             current_effective = lo.effective_cond
-            continue
 
-        if lo.is_directive_elif():
+        elif lo.is_directive_elif():
             frame = stack[-1]
             cond_elif = lo.local_cond or CondExpr.true()
 
@@ -380,20 +379,23 @@ def propagate_effective_cond(objs):
 
             frame.taken = CondExpr.Or(frame.taken, cond_elif)
             current_effective = lo.effective_cond
-            continue
 
-        if lo.is_directive_else():
+        elif lo.is_directive_else():
             frame = stack[-1]
             local = CondExpr.Not(frame.taken)
             lo.effective_cond = CondExpr.And(frame.parent_effective, local)
             current_effective = lo.effective_cond
-            continue
 
-        if lo.is_directive_endif():
+        elif lo.is_directive_endif():
             frame = stack.pop()
             lo.effective_cond = frame.parent_effective
             current_effective = frame.parent_effective
-            continue
+
+        if lo.effective_cond is None:
+            lo.debug["effective_cond"] = ""
+        else:
+            lo.debug["effective_cond"] = repr(lo.effective_cond)
+
 
 # ------------------------------------------------------------
 # eval_atom
@@ -576,6 +578,9 @@ def remove_false_branches(objs, defined_set, undefined_set):
                 for i in range(start, stop + 1):
                     to_remove.add(i)
 
+    for idx, lo in enumerate(objs):
+        lo.debug["false_branch"] = "T" if idx in to_remove else "F"
+
     return to_remove
 
 def compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove):
@@ -597,6 +602,17 @@ def compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove):
                 v = eval_expr(expr, defined_set, undefined_set)
                 if v == TriValue.PENDING:
                     if_chain_pending[parent_idx] = True
+
+    for idx, lo in enumerate(objs):
+        if not idx in if_chain_pending:
+            lo.debug["pending"] = "_"
+        elif if_chain_pending[idx] is True:
+            lo.debug["pending"] = "T"
+        elif if_chain_pending[idx] is False:
+            lo.debug["pending"] = "F"
+        else:
+            lo.debug["pending"] = "?"
+
     return if_chain_pending
 
 def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, idx_to_remove):
@@ -638,7 +654,10 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, id
                     idx_to_remove.add(idx)
                     continue
 
-def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[]):
+    for idx, lo in enumerate(objs):
+        lo.debug["inactive_branch"] = "T" if idx in idx_to_remove else "F"
+
+def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[], debug = False):
     if "--debug" in sys.argv:
         print("===== OBJS DUMP =====")
         for i, lo in enumerate(objs):
@@ -660,6 +679,18 @@ def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[]):
 
     # Step 3: normal filtering
     remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, idx_to_remove)
+
+    if debug:
+        max_width_eff = max( len(lo.debug["effective_cond"]) for lo in objs )
+        for lo in objs:
+            if lo.debug['inactive_branch'] == 'T':
+                str_act_color = '\033[31mx\033[0m'
+            else:
+                str_act_color = '\033[32mO\033[0m'
+            print(f"[DEBUG] eff={lo.debug['effective_cond']:{max_width_eff}} "
+                  f"pnd={lo.debug['pending']} "
+                  f"act={str_act_color} "
+                  f"→ {lo.text}")
 
     return postprocess_repair_structure(objs, idx_to_remove)
 
@@ -902,11 +933,7 @@ def main():
 
     propagate_effective_cond(objs)
 
-    if args.debug:
-        for lo in objs:
-            print(f"[DEBUG] {lo.text}  →  {lo.effective_cond}")
-
-    source_processed = filter_output_lines(objs, args.D, args.U, apple_libc_blocks)
+    source_processed = filter_output_lines(objs, args.D, args.U, apple_libc_blocks, args.debug)
 
     if args.patch:
         source_original = [lo.text for lo in objs]
