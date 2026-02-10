@@ -195,6 +195,18 @@ class DirectiveKind(Enum):
     ELSE     = auto()	# else
     ENDIF    = auto()	# endif
 
+    def __repr__(self):
+        if self == DirectiveKind.NONE:     return "<none>"
+        if self == DirectiveKind.DISABLED: return "<disabled>"
+        if self == DirectiveKind.PP_MISC:  return "#pp_misc"
+        if self == DirectiveKind.IF:     return "#if"
+        if self == DirectiveKind.IFDEF:  return "#ifdef"
+        if self == DirectiveKind.IFNDEF: return "#ifndef"
+        if self == DirectiveKind.ELIF:   return "#elif"
+        if self == DirectiveKind.ELSE:   return "#else"
+        if self == DirectiveKind.ENDIF:  return "#endif"
+        return "<unknown>"
+
 @dataclass
 class LineObj:
     text: str
@@ -658,10 +670,12 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, id
         lo.debug["inactive_branch"] = "T" if idx in idx_to_remove else "F"
 
 def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[], debug = False):
-    if "--debug" in sys.argv:
+    if debug:
         print("===== OBJS DUMP =====")
         for i, lo in enumerate(objs):
-            print(f"[{i:03}] {lo.text.rstrip()}   dir={lo.directive}   related_if={lo.related_if}")
+            # print(f"[{i:03}] {lo.text.rstrip()}   dir={lo.directive}   related_if={lo.related_if}")
+            s_related_if = f"{lo.related_if:03}" if lo.related_if else "   "
+            print(f"[{i:03}] dir={repr(lo.directive):13s} related_if={s_related_if} {lo.text.rstrip()}")
         print("======================")
 
     idx_to_remove = set()
