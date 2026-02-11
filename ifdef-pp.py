@@ -544,42 +544,42 @@ def expr_to_if(expr):
 # filter_output_lines
 # ------------------------------------------------------------
 
-def collect_if_chains(objs):
+def collect_if_blocks(objs):
     """
     return:
-        chains: dict
+        if_blocks: dict
             if_idx -> {
                 "branches": [branch_start_idx, ...],
                 "end": endif_idx
             }
     """
-    chains = {}
+    if_blocks = {}
     stack = []
 
     for idx, lo in enumerate(objs):
         if lo.is_directive_iflike():
-            chains[idx] = {"branches": [idx], "end": None}
+            if_blocks[idx] = {"branches": [idx], "end": None}
             stack.append(idx)
 
         elif lo.is_directive_elselike():
             parent = lo.related_if
-            if parent in chains:
-                chains[parent]["branches"].append(idx)
+            if parent in if_blocks:
+                if_blocks[parent]["branches"].append(idx)
 
         elif lo.is_directive_endif():
             parent = lo.related_if
-            if parent in chains:
-                chains[parent]["end"] = idx
+            if parent in if_blocks:
+                if_blocks[parent]["end"] = idx
             if stack:
                 stack.pop()
 
-    return chains
+    return if_blocks
 
-def collapse_fully_resolved_if_chains(objs, defined_set, undefined_set):
+def collapse_fully_resolved_if_blocks(objs, defined_set, undefined_set):
     to_remove = set()
-    chains = collect_if_chains(objs)
+    if_blocks = collect_if_blocks(objs)
 
-    for if_idx, info in chains.items():
+    for if_idx, info in if_blocks.items():
         branches = info["branches"]
         end = info["end"]
         if end is None:
@@ -605,9 +605,9 @@ def collapse_fully_resolved_if_chains(objs, defined_set, undefined_set):
 
 def remove_false_branches(objs, defined_set, undefined_set):
     to_remove = set()
-    chains = collect_if_chains(objs)
+    if_blocks = collect_if_blocks(objs)
 
-    for if_idx, info in chains.items():
+    for if_idx, info in if_blocks.items():
         branches = info["branches"]
         end = info["end"]
         if end is None:
@@ -635,8 +635,8 @@ def remove_false_branches(objs, defined_set, undefined_set):
 
     return to_remove
 
-def compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove):
-    if_chain_pending = {}
+def compute_if_block_pending(objs, defined_set, undefined_set, idx_to_remove):
+    if_block_pending = {}
 
     for idx, lo in enumerate(objs):
         if idx in idx_to_remove:
@@ -645,29 +645,29 @@ def compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove):
         if lo.is_directive_iflike():
             expr = lo.effective_cond or CondExpr.true()
             v = eval_expr(expr, defined_set, undefined_set)
-            if_chain_pending[idx] = (v == TriValue.PENDING)
+            if_block_pending[idx] = (v == TriValue.PENDING)
 
         elif lo.is_directive_elselike():
             parent_idx = lo.related_if
-            if parent_idx is not None and parent_idx in if_chain_pending:
+            if parent_idx is not None and parent_idx in if_block_pending:
                 expr = lo.effective_cond or CondExpr.true()
                 v = eval_expr(expr, defined_set, undefined_set)
                 if v == TriValue.PENDING:
-                    if_chain_pending[parent_idx] = True
+                    if_block_pending[parent_idx] = True
 
     for idx, lo in enumerate(objs):
-        if not idx in if_chain_pending:
+        if not idx in if_block_pending:
             lo.debug["pending"] = "_"
-        elif if_chain_pending[idx] is True:
+        elif if_block_pending[idx] is True:
             lo.debug["pending"] = "T"
-        elif if_chain_pending[idx] is False:
+        elif if_block_pending[idx] is False:
             lo.debug["pending"] = "F"
         else:
             lo.debug["pending"] = "?"
 
-    return if_chain_pending
+    return if_block_pending
 
-def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, idx_to_remove):
+def remove_inactive_lines(objs, defined_set, undefined_set, if_block_pending, idx_to_remove):
     for idx, lo in enumerate(objs):
         if idx in idx_to_remove:
             continue
@@ -680,10 +680,10 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, id
 
         v = eval_expr(expr, defined_set, undefined_set)
 
-        # Check if parent if-chain is pending
+        # Check if parent if-block is pending
         parent_pending = False
-        if lo.related_if is not None and lo.related_if in if_chain_pending:
-            if if_chain_pending[lo.related_if]:
+        if lo.related_if is not None and lo.related_if in if_block_pending:
+            if if_block_pending[lo.related_if]:
                 parent_pending = True
 
         # 1) Remove inactive lines (only when parent is not pending)
@@ -699,8 +699,8 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, id
         # 3) Special handling for #endif
         if lo.is_directive_endif():
             parent_idx = lo.related_if
-            if parent_idx is not None and parent_idx in if_chain_pending:
-                if if_chain_pending[parent_idx]:
+            if parent_idx is not None and parent_idx in if_block_pending:
+                if if_block_pending[parent_idx]:
                     continue
                 else:
                     idx_to_remove.add(idx)
@@ -734,19 +734,19 @@ def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[], 
 
     idx_to_remove = set()
 
-    # Step 1: collapse fully resolved if-chains
-    collapse = collapse_fully_resolved_if_chains(objs, defined_set, undefined_set)
+    # Step 1: collapse fully resolved if-blocks
+    collapse = collapse_fully_resolved_if_blocks(objs, defined_set, undefined_set)
     idx_to_remove |= collapse
 
-    # Step 2: detect pending status of each if-chain
-    if_chain_pending = compute_if_chain_pending(objs, defined_set, undefined_set, idx_to_remove)
+    # Step 2: detect pending status of each if-block
+    if_block_pending = compute_if_block_pending(objs, defined_set, undefined_set, idx_to_remove)
 
     # Step 2.5: remove FALSE branches entirely (only when -U is used)
     false_branch_remove = remove_false_branches(objs, defined_set, undefined_set)
     idx_to_remove |= false_branch_remove
 
     # Step 3: normal filtering
-    remove_inactive_lines(objs, defined_set, undefined_set, if_chain_pending, idx_to_remove)
+    remove_inactive_lines(objs, defined_set, undefined_set, if_block_pending, idx_to_remove)
 
     if debug:
         max_width_eff = debug_column_width(objs, "effective_cond")
