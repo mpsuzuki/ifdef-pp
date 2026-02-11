@@ -253,8 +253,8 @@ class LineObj:
     debug: dict = field(default_factory=dict)
     directive: DirectiveKind = DirectiveKind.NONE
     related_if: Optional[int] = None
-    local_cond: Optional[CondExpr] = None
-    effective_cond: Optional[CondExpr] = None
+    br_hdr_cond: Optional[CondExpr] = None
+    acc_cond: Optional[CondExpr] = None
 
     def is_directive_if(self): return self.directive == DirectiveKind.IF
     def is_directive_ifdef(self): return self.directive == DirectiveKind.IFDEF
@@ -284,7 +284,7 @@ class LineObj:
 
 @dataclass
 class IfFrame:
-    parent_effective: CondExpr
+    parent_acc: CondExpr
     taken: CondExpr
 
 # ------------------------------------------------------------
@@ -324,14 +324,14 @@ def parse_lines(lines):
 
         if m := regex_ifdef.match(line):
             lo.directive = DirectiveKind.IFDEF
-            lo.local_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
+            lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
             lo.related_if = idx
             if_stack.append(idx)
             continue
 
         elif m := regex_ifndef.match(line):
             lo.directive = DirectiveKind.IFNDEF
-            lo.local_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
+            lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
             lo.related_if = idx
             if_stack.append(idx)
             continue
@@ -341,14 +341,14 @@ def parse_lines(lines):
             expr_after_if = m.group(1).strip()
             if m2 := regex_defined.fullmatch(expr_after_if):
                 macro = m2.group(1)
-                lo.local_cond = CondExpr.atom_expr(CondAtom.neutral(macro))
+                lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(macro))
             elif m2 := regex_not_defined.fullmatch(expr_after_if):
                 macro = m2.group(1)
-                lo.local_cond = CondExpr.Not(
+                lo.br_hdr_cond = CondExpr.Not(
                     CondExpr.atom_expr(CondAtom.neutral(macro))
                 )
             else:
-                lo.local_cond = CondExpr.Unknown(expr_after_if)
+                lo.br_hdr_cond = CondExpr.Unknown(expr_after_if)
 
             lo.related_if = idx
             if_stack.append(idx)
@@ -357,14 +357,14 @@ def parse_lines(lines):
         elif m := regex_elif_defined.match(line):
             lo.directive = DirectiveKind.ELIF
             resolve_parent_if(lo, if_stack, objs, idx)
-            lo.local_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
+            lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
             continue
 
         elif m := regex_elif_not_defined.match(line):
             lo.directive = DirectiveKind.ELIF
             resolve_parent_if(lo, if_stack, objs, idx)
             macro = m.group(1)
-            lo.local_cond = CondExpr.Not(
+            lo.br_hdr_cond = CondExpr.Not(
                 CondExpr.atom_expr(CondAtom.neutral(macro))
             )
             continue
@@ -372,19 +372,19 @@ def parse_lines(lines):
         elif m := regex_elif.match(line):
             lo.directive = DirectiveKind.ELIF
             resolve_parent_if(lo, if_stack, objs, idx)
-            lo.local_cond = CondExpr.Unknown(m.group(1).strip())
+            lo.br_hdr_cond = CondExpr.Unknown(m.group(1).strip())
             continue
 
         elif regex_else.match(line):
             lo.directive = DirectiveKind.ELSE
             resolve_parent_if(lo, if_stack, objs, idx)
-            lo.local_cond = CondExpr.true()
+            lo.br_hdr_cond = CondExpr.true()
             continue
 
         elif regex_endif.match(line):
             lo.directive = DirectiveKind.ENDIF
             resolve_parent_if(lo, if_stack, objs, idx)
-            lo.local_cond = CondExpr.true()
+            lo.br_hdr_cond = CondExpr.true()
             if_stack.pop()
             continue
 
@@ -401,52 +401,52 @@ def parse_lines(lines):
     return objs
 
 # ------------------------------------------------------------
-# propagate_effective_cond
+# propagate_acc_cond
 # ------------------------------------------------------------
 
-def propagate_effective_cond(objs):
-    current_effective = CondExpr.true()
+def propagate_acc_cond(objs):
+    current_acc = CondExpr.true()
     stack = []
 
     for lo in objs:
 
         if lo.is_directive_none() or lo.is_directive_pp_misc():
-            lo.effective_cond = current_effective
+            lo.acc_cond = current_acc
 
         elif lo.is_directive_iflike():
-            cond_if = lo.local_cond or CondExpr.true()
-            lo.effective_cond = CondExpr.And(current_effective, cond_if)
+            cond_if = lo.br_hdr_cond or CondExpr.true()
+            lo.acc_cond = CondExpr.And(current_acc, cond_if)
 
-            frame = IfFrame(parent_effective=current_effective, taken=cond_if)
+            frame = IfFrame(parent_acc=current_acc, taken=cond_if)
             stack.append(frame)
 
-            current_effective = lo.effective_cond
+            current_acc = lo.acc_cond
 
         elif lo.is_directive_elif():
             frame = stack[-1]
-            cond_elif = lo.local_cond or CondExpr.true()
+            cond_elif = lo.br_hdr_cond or CondExpr.true()
 
-            local = CondExpr.And(cond_elif, CondExpr.Not(frame.taken))
-            lo.effective_cond = CondExpr.And(frame.parent_effective, local)
+            br_hdr_cond = CondExpr.And(cond_elif, CondExpr.Not(frame.taken))
+            lo.acc_cond = CondExpr.And(frame.parent_acc, br_hdr_cond)
 
             frame.taken = CondExpr.Or(frame.taken, cond_elif)
-            current_effective = lo.effective_cond
+            current_acc = lo.acc_cond
 
         elif lo.is_directive_else():
             frame = stack[-1]
-            local = CondExpr.Not(frame.taken)
-            lo.effective_cond = CondExpr.And(frame.parent_effective, local)
-            current_effective = lo.effective_cond
+            br_hdr_cond = CondExpr.Not(frame.taken)
+            lo.acc_cond = CondExpr.And(frame.parent_acc, br_hdr_cond)
+            current_acc = lo.acc_cond
 
         elif lo.is_directive_endif():
             frame = stack.pop()
-            lo.effective_cond = frame.parent_effective
-            current_effective = frame.parent_effective
+            lo.acc_cond = frame.parent_acc
+            current_acc = frame.parent_acc
 
-        if lo.effective_cond is None:
-            lo.debug["effective_cond"] = ""
+        if lo.acc_cond is None:
+            lo.debug["acc_cond"] = ""
         else:
-            lo.debug["effective_cond"] = repr(lo.effective_cond)
+            lo.debug["acc_cond"] = repr(lo.acc_cond)
 
 
 # ------------------------------------------------------------
@@ -587,7 +587,7 @@ def collapse_fully_resolved_if_blocks(objs, defined_set, undefined_set):
 
         results = []
         for b in branches:
-            expr = objs[b].effective_cond or CondExpr.true()
+            expr = objs[b].acc_cond or CondExpr.true()
             v = eval_expr(expr, defined_set, undefined_set)
             results.append((b, v))
 
@@ -624,7 +624,7 @@ def remove_false_branches(objs, defined_set, undefined_set):
 
         # evaluate and remove
         for start, stop in ranges:
-            expr = objs[start].effective_cond or CondExpr.true()
+            expr = objs[start].acc_cond or CondExpr.true()
             v = eval_expr(expr, defined_set, undefined_set)
             if v == TriValue.FALSE:
                 for i in range(start, stop + 1):
@@ -643,14 +643,14 @@ def compute_if_block_pending(objs, defined_set, undefined_set, idx_to_remove):
             continue
 
         if lo.is_directive_iflike():
-            expr = lo.effective_cond or CondExpr.true()
+            expr = lo.acc_cond or CondExpr.true()
             v = eval_expr(expr, defined_set, undefined_set)
             if_block_pending[idx] = (v == TriValue.PENDING)
 
         elif lo.is_directive_elselike():
             parent_idx = lo.related_if
             if parent_idx is not None and parent_idx in if_block_pending:
-                expr = lo.effective_cond or CondExpr.true()
+                expr = lo.acc_cond or CondExpr.true()
                 v = eval_expr(expr, defined_set, undefined_set)
                 if v == TriValue.PENDING:
                     if_block_pending[parent_idx] = True
@@ -672,11 +672,11 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_block_pending, id
         if idx in idx_to_remove:
             continue
 
-        # Directives use local_cond; normal lines use effective_cond
+        # Directives use br_hdr_cond; normal lines use acc_cond
         if lo.is_directive_conditional_entry():
-            expr = lo.local_cond or CondExpr.true()
+            expr = lo.br_hdr_cond or CondExpr.true()
         else:
-            expr = lo.effective_cond or CondExpr.true()
+            expr = lo.acc_cond or CondExpr.true()
 
         v = eval_expr(expr, defined_set, undefined_set)
 
@@ -749,13 +749,13 @@ def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[], 
     remove_inactive_lines(objs, defined_set, undefined_set, if_block_pending, idx_to_remove)
 
     if debug:
-        max_width_eff = debug_column_width(objs, "effective_cond")
+        max_width_acc = debug_column_width(objs, "acc_cond")
         for lo in objs:
             if lo.debug['inactive_branch'] == 'T':
                 str_act_color = '\033[31mx\033[0m'
             else:
                 str_act_color = '\033[32mO\033[0m'
-            print(f"[DEBUG] eff={lo.debug['effective_cond']:{max_width_eff}} "
+            print(f"[DEBUG] acc={lo.debug['acc_cond']:{max_width_acc}} "
                   f"pnd={lo.debug['pending']} "
                   f"act={str_act_color} "
                   f"→ {lo.text}")
@@ -776,7 +776,7 @@ def postprocess_repair_structure(objs, removed):
         if lo.is_directive_elif():
             parent = lo.related_if
             if parent in removed:
-                new_lines.append(f"{lo.directive_prefix()}if {expr_to_if(lo.local_cond)}")
+                new_lines.append(f"{lo.directive_prefix()}if {expr_to_if(lo.br_hdr_cond)}")
                 continue
 
         if lo.is_directive_else():
@@ -830,12 +830,12 @@ def detect_header_guard(objs, debug = False):
         print(f"detect_header_guard: {if_idx} is '#ifndef' or '#if defined'")
 
     # extract a macro used for header guard
-    #   confirm local_conds has one macro only
-    local_macros = if_obj.local_cond.macros()
-    if len(local_macros) != 1:
+    #   confirm br_hdr_cond has one macro only
+    br_hdr_macros = if_obj.br_hdr_cond.macros()
+    if len(br_hdr_macros) != 1:
         return None
 
-    macro = local_macros[0]
+    macro = br_hdr_macros[0]
 
     if debug:
         print(f"detect_header_guard: {macro} is header guard macro")
@@ -997,9 +997,9 @@ def main():
             guard_start, guard_define, guard_end, guard_macro = guard
             for idx in [guard_start, guard_define, guard_end]:
                 objs[idx].directive   = DirectiveKind.DISABLED
-                objs[idx].local_conds = []
+                objs[idx].br_hdr_cond = None
 
-    propagate_effective_cond(objs)
+    propagate_acc_cond(objs)
 
     source_processed = filter_output_lines(objs, args.D, args.U, apple_libc_blocks, args.debug)
 
