@@ -406,7 +406,7 @@ def parse_lines(lines):
 
 def propagate_acc_cond(objs):
     current_acc = CondExpr.true()
-    stack = []
+    ctx_stack = []
 
     for lo in objs:
 
@@ -418,12 +418,12 @@ def propagate_acc_cond(objs):
             lo.acc_cond = CondExpr.And(current_acc, cond_if)
 
             if_ctx = IfCtx(outer_acc = current_acc, blk_consumed_cond = cond_if)
-            stack.append(if_ctx)
+            ctx_stack.append(if_ctx)
 
             current_acc = lo.acc_cond
 
         elif lo.is_directive_elif():
-            if_ctx = stack[-1]
+            if_ctx = ctx_stack[-1]
             cond_elif = lo.br_hdr_cond or CondExpr.true()
 
             br_hdr_cond = CondExpr.And(cond_elif, CondExpr.Not(if_ctx.blk_consumed_cond))
@@ -433,13 +433,13 @@ def propagate_acc_cond(objs):
             current_acc = lo.acc_cond
 
         elif lo.is_directive_else():
-            if_ctx = stack[-1]
+            if_ctx = ctx_stack[-1]
             br_hdr_cond = CondExpr.Not(if_ctx.blk_consumed_cond)
             lo.acc_cond = CondExpr.And(if_ctx.outer_acc, br_hdr_cond)
             current_acc = lo.acc_cond
 
         elif lo.is_directive_endif():
-            if_ctx = stack.pop()
+            if_ctx = ctx_stack.pop()
             lo.acc_cond = if_ctx.outer_acc
             current_acc = if_ctx.outer_acc
 
