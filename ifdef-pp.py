@@ -252,7 +252,7 @@ class LineObj:
     text: str
     debug: dict = field(default_factory=dict)
     directive: DirectiveKind = DirectiveKind.NONE
-    related_if: Optional[int] = None
+    blk_hdr_idx: Optional[int] = None
     br_hdr_cond: Optional[CondExpr] = None
     acc_cond: Optional[CondExpr] = None
 
@@ -304,10 +304,10 @@ regex_else   = re.compile(r'^\s*#\s*else\b')
 regex_endif  = re.compile(r'^\s*#\s*endif\b')
 regex_misc   = re.compile(r'^\s*#\s*([A-Za-z_]\w*)')
 
-def resolve_parent_if(lo, if_stack, objs, idx):
+def assign_blk_hdr_idx(lo, if_stack, objs, idx):
     if not if_stack:
         raise SyntaxError(f"Unmatched directive at line {idx+1}: {lo.text}")
-    lo.related_if = if_stack[-1]
+    lo.blk_hdr_idx = if_stack[-1]
     return
 
 # ------------------------------------------------------------
@@ -325,14 +325,14 @@ def parse_lines(lines):
         if m := regex_ifdef.match(line):
             lo.directive = DirectiveKind.IFDEF
             lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
-            lo.related_if = idx
+            lo.blk_hdr_idx = idx
             if_stack.append(idx)
             continue
 
         elif m := regex_ifndef.match(line):
             lo.directive = DirectiveKind.IFNDEF
             lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
-            lo.related_if = idx
+            lo.blk_hdr_idx = idx
             if_stack.append(idx)
             continue
 
@@ -350,19 +350,19 @@ def parse_lines(lines):
             else:
                 lo.br_hdr_cond = CondExpr.Unknown(expr_after_if)
 
-            lo.related_if = idx
+            lo.blk_hdr_idx = idx
             if_stack.append(idx)
             continue
 
         elif m := regex_elif_defined.match(line):
             lo.directive = DirectiveKind.ELIF
-            resolve_parent_if(lo, if_stack, objs, idx)
+            assign_blk_hdr_idx(lo, if_stack, objs, idx)
             lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
             continue
 
         elif m := regex_elif_not_defined.match(line):
             lo.directive = DirectiveKind.ELIF
-            resolve_parent_if(lo, if_stack, objs, idx)
+            assign_blk_hdr_idx(lo, if_stack, objs, idx)
             macro = m.group(1)
             lo.br_hdr_cond = CondExpr.Not(
                 CondExpr.atom_expr(CondAtom.neutral(macro))
@@ -371,19 +371,19 @@ def parse_lines(lines):
 
         elif m := regex_elif.match(line):
             lo.directive = DirectiveKind.ELIF
-            resolve_parent_if(lo, if_stack, objs, idx)
+            assign_blk_hdr_idx(lo, if_stack, objs, idx)
             lo.br_hdr_cond = CondExpr.Unknown(m.group(1).strip())
             continue
 
         elif regex_else.match(line):
             lo.directive = DirectiveKind.ELSE
-            resolve_parent_if(lo, if_stack, objs, idx)
+            assign_blk_hdr_idx(lo, if_stack, objs, idx)
             lo.br_hdr_cond = CondExpr.true()
             continue
 
         elif regex_endif.match(line):
             lo.directive = DirectiveKind.ENDIF
-            resolve_parent_if(lo, if_stack, objs, idx)
+            assign_blk_hdr_idx(lo, if_stack, objs, idx)
             lo.br_hdr_cond = CondExpr.true()
             if_stack.pop()
             continue
@@ -562,14 +562,14 @@ def collect_if_blocks(objs):
             stack.append(idx)
 
         elif lo.is_directive_elselike():
-            parent = lo.related_if
-            if parent in if_blocks:
-                if_blocks[parent]["branches"].append(idx)
+            blk_hdr_idx = lo.blk_hdr_idx
+            if blk_hdr_idx in if_blocks:
+                if_blocks[blk_hdr_idx]["branches"].append(idx)
 
         elif lo.is_directive_endif():
-            parent = lo.related_if
-            if parent in if_blocks:
-                if_blocks[parent]["end"] = idx
+            blk_hdr_idx = lo.blk_hdr_idx
+            if blk_hdr_idx in if_blocks:
+                if_blocks[blk_hdr_idx]["end"] = idx
             if stack:
                 stack.pop()
 
@@ -598,7 +598,7 @@ def collapse_fully_resolved_if_blocks(objs, defined_set, undefined_set):
             # remove directives only
             for i in range(if_idx, end + 1):
                 lo = objs[i]
-                if lo.related_if == if_idx:
+                if lo.blk_hdr_idx == if_idx:
                     to_remove.add(i)
 
     return to_remove
@@ -648,12 +648,12 @@ def compute_if_block_pending(objs, defined_set, undefined_set, idx_to_remove):
             if_block_pending[idx] = (v == TriValue.PENDING)
 
         elif lo.is_directive_elselike():
-            parent_idx = lo.related_if
-            if parent_idx is not None and parent_idx in if_block_pending:
+            blk_hdr_idx = lo.blk_hdr_idx
+            if blk_hdr_idx is not None and blk_hdr_idx in if_block_pending:
                 expr = lo.acc_cond or CondExpr.true()
                 v = eval_expr(expr, defined_set, undefined_set)
                 if v == TriValue.PENDING:
-                    if_block_pending[parent_idx] = True
+                    if_block_pending[blk_hdr_idx] = True
 
     for idx, lo in enumerate(objs):
         if not idx in if_block_pending:
@@ -680,27 +680,27 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_block_pending, id
 
         v = eval_expr(expr, defined_set, undefined_set)
 
-        # Check if parent if-block is pending
-        parent_pending = False
-        if lo.related_if is not None and lo.related_if in if_block_pending:
-            if if_block_pending[lo.related_if]:
-                parent_pending = True
+        # Check if current if-block is pending
+        cur_if_block_pending = False
+        if lo.blk_hdr_idx is not None and lo.blk_hdr_idx in if_block_pending:
+            if if_block_pending[lo.blk_hdr_idx]:
+                cur_if_block_pending = True
 
-        # 1) Remove inactive lines (only when parent is not pending)
-        if v == TriValue.FALSE and not parent_pending:
+        # 1) Remove inactive lines (only when current block is not pending)
+        if v == TriValue.FALSE and not cur_if_block_pending:
             idx_to_remove.add(idx)
             continue
 
         # 2) Remove directive lines that are fully TRUE (except #endif)
-        if v.is_true() and not parent_pending and lo.is_directive_conditional_entry():
+        if v.is_true() and not cur_if_block_pending and lo.is_directive_conditional_entry():
             idx_to_remove.add(idx)
             continue
 
         # 3) Special handling for #endif
         if lo.is_directive_endif():
-            parent_idx = lo.related_if
-            if parent_idx is not None and parent_idx in if_block_pending:
-                if if_block_pending[parent_idx]:
+            blk_hdr_idx = lo.blk_hdr_idx
+            if blk_hdr_idx is not None and blk_hdr_idx in if_block_pending:
+                if if_block_pending[blk_hdr_idx]:
                     continue
                 else:
                     idx_to_remove.add(idx)
@@ -724,11 +724,11 @@ def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[], 
         max_width_dir = directive_column_width(objs)
         s_clr256_rst = ppdir_color256(None)
         for i, lo in enumerate(objs):
-            s_related_if = f"{lo.related_if:03}" if lo.related_if else "_"
+            s_blk_hdr_idx = f"{lo.blk_hdr_idx:03}" if lo.blk_hdr_idx else "_"
             s_clr256 = ppdir_color256(lo.directive)
             print(f"[{i:03}] "
                   f"dir={s_clr256}{repr(lo.directive):{max_width_dir}s}{s_clr256_rst} "
-                  f"related_if={s_related_if} "
+                  f"blk_hdr={s_blk_hdr_idx} "
                   f"    {lo.text.rstrip()}")
         print("======================")
 
@@ -774,14 +774,14 @@ def postprocess_repair_structure(objs, removed):
             continue
 
         if lo.is_directive_elif():
-            parent = lo.related_if
-            if parent in removed:
+            blk_hdr_idx = lo.blk_hdr_idx
+            if blk_hdr_idx in removed:
                 new_lines.append(f"{lo.directive_prefix()}if {expr_to_if(lo.br_hdr_cond)}")
                 continue
 
         if lo.is_directive_else():
-            parent = lo.related_if
-            if parent in removed:
+            blk_hdr_idx = lo.blk_hdr_idx
+            if blk_hdr_idx in removed:
                 new_lines.append(f"{lo.directive_prefix()}else")
                 continue
 
@@ -812,11 +812,11 @@ def detect_header_guard(objs, debug = False):
 
     endif_obj = objs[endif_idx]
 
-    # if no related_if for the last endif, the source is broken
-    if endif_obj.related_if is None:
+    # if no blk_hdr_idx for the last endif, the source is broken
+    if endif_obj.blk_hdr_idx is None:
         return None
 
-    if_idx = endif_obj.related_if
+    if_idx = endif_obj.blk_hdr_idx
     if_obj = objs[if_idx]
 
     if debug:
