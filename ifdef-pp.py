@@ -304,11 +304,9 @@ regex_else   = re.compile(r'^\s*#\s*else\b')
 regex_endif  = re.compile(r'^\s*#\s*endif\b')
 regex_misc   = re.compile(r'^\s*#\s*([A-Za-z_]\w*)')
 
-def assign_blk_hdr_idx(lo, if_stack, objs, idx):
-    if not if_stack:
-        raise SyntaxError(f"Unmatched directive at line {idx+1}: {lo.text}")
-    lo.blk_hdr_idx = if_stack[-1]
-    return
+def assert_block_header_stack_nonempty(blk_hdr_stack, lo, lo_idx):
+    if not blk_hdr_stack:
+        raise SyntaxError(f"Unmatched directive at line {lo_idx+1}: {lo.text}")
 
 # ------------------------------------------------------------
 # parse_lines
@@ -316,7 +314,7 @@ def assign_blk_hdr_idx(lo, if_stack, objs, idx):
 
 def parse_lines(lines):
     objs = []
-    if_stack = []
+    blk_hdr_stack = []
 
     for idx, line in enumerate(lines):
         lo = LineObj(text=line)
@@ -326,14 +324,14 @@ def parse_lines(lines):
             lo.directive = DirectiveKind.IFDEF
             lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
             lo.blk_hdr_idx = idx
-            if_stack.append(idx)
+            blk_hdr_stack.append(idx)
             continue
 
         elif m := regex_ifndef.match(line):
             lo.directive = DirectiveKind.IFNDEF
             lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
             lo.blk_hdr_idx = idx
-            if_stack.append(idx)
+            blk_hdr_stack.append(idx)
             continue
 
         elif m := regex_if.match(line):
@@ -351,18 +349,20 @@ def parse_lines(lines):
                 lo.br_hdr_cond = CondExpr.Unknown(expr_after_if)
 
             lo.blk_hdr_idx = idx
-            if_stack.append(idx)
+            blk_hdr_stack.append(idx)
             continue
 
         elif m := regex_elif_defined.match(line):
             lo.directive = DirectiveKind.ELIF
-            assign_blk_hdr_idx(lo, if_stack, objs, idx)
+            assert_block_header_stack_nonempty(blk_hdr_stack, lo, idx)
+            lo.blk_hdr_idx = blk_hdr_stack[-1]
             lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
             continue
 
         elif m := regex_elif_not_defined.match(line):
             lo.directive = DirectiveKind.ELIF
-            assign_blk_hdr_idx(lo, if_stack, objs, idx)
+            assert_block_header_stack_nonempty(blk_hdr_stack, lo, idx)
+            lo.blk_hdr_idx = blk_hdr_stack[-1]
             macro = m.group(1)
             lo.br_hdr_cond = CondExpr.Not(
                 CondExpr.atom_expr(CondAtom.neutral(macro))
@@ -371,21 +371,24 @@ def parse_lines(lines):
 
         elif m := regex_elif.match(line):
             lo.directive = DirectiveKind.ELIF
-            assign_blk_hdr_idx(lo, if_stack, objs, idx)
+            assert_block_header_stack_nonempty(blk_hdr_stack, lo, idx)
+            lo.blk_hdr_idx = blk_hdr_stack[-1]
             lo.br_hdr_cond = CondExpr.Unknown(m.group(1).strip())
             continue
 
         elif regex_else.match(line):
             lo.directive = DirectiveKind.ELSE
-            assign_blk_hdr_idx(lo, if_stack, objs, idx)
+            assert_block_header_stack_nonempty(blk_hdr_stack, lo, idx)
+            lo.blk_hdr_idx = blk_hdr_stack[-1]
             lo.br_hdr_cond = CondExpr.true()
             continue
 
         elif regex_endif.match(line):
             lo.directive = DirectiveKind.ENDIF
-            assign_blk_hdr_idx(lo, if_stack, objs, idx)
+            assert_block_header_stack_nonempty(blk_hdr_stack, lo, idx)
+            lo.blk_hdr_idx = blk_hdr_stack[-1]
             lo.br_hdr_cond = CondExpr.true()
-            if_stack.pop()
+            blk_hdr_stack.pop()
             continue
 
         elif regex_misc.match(line):
@@ -395,7 +398,7 @@ def parse_lines(lines):
         else:
             lo.directive = DirectiveKind.NONE
 
-    if if_stack:
+    if blk_hdr_stack:
         raise SyntaxError("Unclosed #if block(s)")
 
     return objs
