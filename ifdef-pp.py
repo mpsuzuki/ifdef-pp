@@ -252,8 +252,8 @@ class LineObj:
     text: str
     debug: dict = field(default_factory=dict)
     directive: DirectiveKind = DirectiveKind.NONE
-    blk_hdr_idx: Optional[int] = None
-    br_hdr_cond: Optional[CondExpr] = None
+    block_header_index: Optional[int] = None
+    branch_header_cond: Optional[CondExpr] = None
     acc_cond: Optional[CondExpr] = None
 
     def is_directive_if(self): return self.directive == DirectiveKind.IF
@@ -285,7 +285,7 @@ class LineObj:
 @dataclass
 class IfCtx:
     outer_acc: CondExpr
-    blk_consumed_cond: CondExpr
+    block_consumed_cond: CondExpr
 
 # ------------------------------------------------------------
 # Regex for parsing directives
@@ -304,8 +304,8 @@ regex_else   = re.compile(r'^\s*#\s*else\b')
 regex_endif  = re.compile(r'^\s*#\s*endif\b')
 regex_misc   = re.compile(r'^\s*#\s*([A-Za-z_]\w*)')
 
-def assert_block_header_stack_nonempty(blk_hdr_stack, lo, lo_idx):
-    if not blk_hdr_stack:
+def assert_block_header_stack_nonempty(block_header_stack, lo, lo_idx):
+    if not block_header_stack:
         raise SyntaxError(f"Unmatched directive at line {lo_idx+1}: {lo.text}")
 
 # ------------------------------------------------------------
@@ -314,7 +314,7 @@ def assert_block_header_stack_nonempty(blk_hdr_stack, lo, lo_idx):
 
 def parse_lines(lines):
     objs = []
-    blk_hdr_stack = []
+    block_header_stack = []
 
     for idx, line in enumerate(lines):
         lo = LineObj(text=line)
@@ -322,16 +322,16 @@ def parse_lines(lines):
 
         if m := regex_ifdef.match(line):
             lo.directive = DirectiveKind.IFDEF
-            lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
-            lo.blk_hdr_idx = idx
-            blk_hdr_stack.append(idx)
+            lo.branch_header_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
+            lo.block_header_index = idx
+            block_header_stack.append(idx)
             continue
 
         elif m := regex_ifndef.match(line):
             lo.directive = DirectiveKind.IFNDEF
-            lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
-            lo.blk_hdr_idx = idx
-            blk_hdr_stack.append(idx)
+            lo.branch_header_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
+            lo.block_header_index = idx
+            block_header_stack.append(idx)
             continue
 
         elif m := regex_if.match(line):
@@ -339,56 +339,56 @@ def parse_lines(lines):
             expr_after_if = m.group(1).strip()
             if m2 := regex_defined.fullmatch(expr_after_if):
                 macro = m2.group(1)
-                lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(macro))
+                lo.branch_header_cond = CondExpr.atom_expr(CondAtom.neutral(macro))
             elif m2 := regex_not_defined.fullmatch(expr_after_if):
                 macro = m2.group(1)
-                lo.br_hdr_cond = CondExpr.Not(
+                lo.branch_header_cond = CondExpr.Not(
                     CondExpr.atom_expr(CondAtom.neutral(macro))
                 )
             else:
-                lo.br_hdr_cond = CondExpr.Unknown(expr_after_if)
+                lo.branch_header_cond = CondExpr.Unknown(expr_after_if)
 
-            lo.blk_hdr_idx = idx
-            blk_hdr_stack.append(idx)
+            lo.block_header_index = idx
+            block_header_stack.append(idx)
             continue
 
         elif m := regex_elif_defined.match(line):
             lo.directive = DirectiveKind.ELIF
-            assert_block_header_stack_nonempty(blk_hdr_stack, lo, idx)
-            lo.blk_hdr_idx = blk_hdr_stack[-1]
-            lo.br_hdr_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
+            assert_block_header_stack_nonempty(block_header_stack, lo, idx)
+            lo.block_header_index = block_header_stack[-1]
+            lo.branch_header_cond = CondExpr.atom_expr(CondAtom.neutral(m.group(1)))
             continue
 
         elif m := regex_elif_not_defined.match(line):
             lo.directive = DirectiveKind.ELIF
-            assert_block_header_stack_nonempty(blk_hdr_stack, lo, idx)
-            lo.blk_hdr_idx = blk_hdr_stack[-1]
+            assert_block_header_stack_nonempty(block_header_stack, lo, idx)
+            lo.block_header_index = block_header_stack[-1]
             macro = m.group(1)
-            lo.br_hdr_cond = CondExpr.Not(
+            lo.branch_header_cond = CondExpr.Not(
                 CondExpr.atom_expr(CondAtom.neutral(macro))
             )
             continue
 
         elif m := regex_elif.match(line):
             lo.directive = DirectiveKind.ELIF
-            assert_block_header_stack_nonempty(blk_hdr_stack, lo, idx)
-            lo.blk_hdr_idx = blk_hdr_stack[-1]
-            lo.br_hdr_cond = CondExpr.Unknown(m.group(1).strip())
+            assert_block_header_stack_nonempty(block_header_stack, lo, idx)
+            lo.block_header_index = block_header_stack[-1]
+            lo.branch_header_cond = CondExpr.Unknown(m.group(1).strip())
             continue
 
         elif regex_else.match(line):
             lo.directive = DirectiveKind.ELSE
-            assert_block_header_stack_nonempty(blk_hdr_stack, lo, idx)
-            lo.blk_hdr_idx = blk_hdr_stack[-1]
-            lo.br_hdr_cond = CondExpr.true()
+            assert_block_header_stack_nonempty(block_header_stack, lo, idx)
+            lo.block_header_index = block_header_stack[-1]
+            lo.branch_header_cond = CondExpr.true()
             continue
 
         elif regex_endif.match(line):
             lo.directive = DirectiveKind.ENDIF
-            assert_block_header_stack_nonempty(blk_hdr_stack, lo, idx)
-            lo.blk_hdr_idx = blk_hdr_stack[-1]
-            lo.br_hdr_cond = CondExpr.true()
-            blk_hdr_stack.pop()
+            assert_block_header_stack_nonempty(block_header_stack, lo, idx)
+            lo.block_header_index = block_header_stack[-1]
+            lo.branch_header_cond = CondExpr.true()
+            block_header_stack.pop()
             continue
 
         elif regex_misc.match(line):
@@ -398,7 +398,7 @@ def parse_lines(lines):
         else:
             lo.directive = DirectiveKind.NONE
 
-    if blk_hdr_stack:
+    if block_header_stack:
         raise SyntaxError("Unclosed #if block(s)")
 
     return objs
@@ -409,7 +409,7 @@ def parse_lines(lines):
 
 def propagate_acc_cond(objs):
     current_acc = CondExpr.true()
-    ctx_stack = []
+    context_stack = []
 
     for lo in objs:
 
@@ -417,32 +417,32 @@ def propagate_acc_cond(objs):
             lo.acc_cond = current_acc
 
         elif lo.is_directive_iflike():
-            cond_if = lo.br_hdr_cond or CondExpr.true()
+            cond_if = lo.branch_header_cond or CondExpr.true()
             lo.acc_cond = CondExpr.And(current_acc, cond_if)
 
-            if_ctx = IfCtx(outer_acc = current_acc, blk_consumed_cond = cond_if)
-            ctx_stack.append(if_ctx)
+            if_ctx = IfCtx(outer_acc = current_acc, block_consumed_cond = cond_if)
+            context_stack.append(if_ctx)
 
             current_acc = lo.acc_cond
 
         elif lo.is_directive_elif():
-            if_ctx = ctx_stack[-1]
-            cond_elif = lo.br_hdr_cond or CondExpr.true()
+            if_ctx = context_stack[-1]
+            cond_elif = lo.branch_header_cond or CondExpr.true()
 
-            br_hdr_cond = CondExpr.And(cond_elif, CondExpr.Not(if_ctx.blk_consumed_cond))
+            br_hdr_cond = CondExpr.And(cond_elif, CondExpr.Not(if_ctx.block_consumed_cond))
             lo.acc_cond = CondExpr.And(if_ctx.outer_acc, br_hdr_cond)
 
-            if_ctx.blk_consumed_cond = CondExpr.Or(if_ctx.blk_consumed_cond, cond_elif)
+            if_ctx.block_consumed_cond = CondExpr.Or(if_ctx.block_consumed_cond, cond_elif)
             current_acc = lo.acc_cond
 
         elif lo.is_directive_else():
-            if_ctx = ctx_stack[-1]
-            br_hdr_cond = CondExpr.Not(if_ctx.blk_consumed_cond)
+            if_ctx = context_stack[-1]
+            br_hdr_cond = CondExpr.Not(if_ctx.block_consumed_cond)
             lo.acc_cond = CondExpr.And(if_ctx.outer_acc, br_hdr_cond)
             current_acc = lo.acc_cond
 
         elif lo.is_directive_endif():
-            if_ctx = ctx_stack.pop()
+            if_ctx = context_stack.pop()
             lo.acc_cond = if_ctx.outer_acc
             current_acc = if_ctx.outer_acc
 
@@ -565,12 +565,12 @@ def collect_if_blocks(objs):
             idx_stack.append(idx)
 
         elif lo.is_directive_elselike():
-            blk_hdr_idx = lo.blk_hdr_idx
+            blk_hdr_idx = lo.block_header_index
             if blk_hdr_idx in if_blocks:
                 if_blocks[blk_hdr_idx]["branches"].append(idx)
 
         elif lo.is_directive_endif():
-            blk_hdr_idx = lo.blk_hdr_idx
+            blk_hdr_idx = lo.block_header_index
             if blk_hdr_idx in if_blocks:
                 if_blocks[blk_hdr_idx]["end"] = idx
             if idx_stack:
@@ -601,7 +601,7 @@ def collapse_fully_resolved_if_blocks(objs, defined_set, undefined_set):
             # remove directives only
             for i in range(if_idx, end + 1):
                 lo = objs[i]
-                if lo.blk_hdr_idx == if_idx:
+                if lo.block_header_index == if_idx:
                     to_remove.add(i)
 
     return to_remove
@@ -651,7 +651,7 @@ def compute_if_block_pending(objs, defined_set, undefined_set, idx_to_remove):
             if_block_pending[idx] = (v == TriValue.PENDING)
 
         elif lo.is_directive_elselike():
-            blk_hdr_idx = lo.blk_hdr_idx
+            blk_hdr_idx = lo.block_header_index
             if blk_hdr_idx is not None and blk_hdr_idx in if_block_pending:
                 expr = lo.acc_cond or CondExpr.true()
                 v = eval_expr(expr, defined_set, undefined_set)
@@ -677,7 +677,7 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_block_pending, id
 
         # Directives use br_hdr_cond; normal lines use acc_cond
         if lo.is_directive_conditional_entry():
-            expr = lo.br_hdr_cond or CondExpr.true()
+            expr = lo.branch_header_cond or CondExpr.true()
         else:
             expr = lo.acc_cond or CondExpr.true()
 
@@ -685,8 +685,8 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_block_pending, id
 
         # Check if current if-block is pending
         cur_if_block_pending = False
-        if lo.blk_hdr_idx is not None and lo.blk_hdr_idx in if_block_pending:
-            if if_block_pending[lo.blk_hdr_idx]:
+        if lo.block_header_index is not None and lo.block_header_index in if_block_pending:
+            if if_block_pending[lo.block_header_index]:
                 cur_if_block_pending = True
 
         # 1) Remove inactive lines (only when current block is not pending)
@@ -701,7 +701,7 @@ def remove_inactive_lines(objs, defined_set, undefined_set, if_block_pending, id
 
         # 3) Special handling for #endif
         if lo.is_directive_endif():
-            blk_hdr_idx = lo.blk_hdr_idx
+            blk_hdr_idx = lo.block_header_index
             if blk_hdr_idx is not None and blk_hdr_idx in if_block_pending:
                 if if_block_pending[blk_hdr_idx]:
                     continue
@@ -727,7 +727,7 @@ def filter_output_lines(objs, defined_set, undefined_set, apple_libc_blocks=[], 
         max_width_dir = directive_column_width(objs)
         s_clr256_rst = ppdir_color256(None)
         for i, lo in enumerate(objs):
-            s_blk_hdr_idx = f"{lo.blk_hdr_idx:03}" if lo.blk_hdr_idx else "_"
+            s_blk_hdr_idx = f"{lo.block_header_index:03}" if lo.block_header_index else "_"
             s_clr256 = ppdir_color256(lo.directive)
             print(f"[{i:03}] "
                   f"dir={s_clr256}{repr(lo.directive):{max_width_dir}s}{s_clr256_rst} "
@@ -777,13 +777,13 @@ def postprocess_repair_structure(objs, removed):
             continue
 
         if lo.is_directive_elif():
-            blk_hdr_idx = lo.blk_hdr_idx
+            blk_hdr_idx = lo.block_header_index
             if blk_hdr_idx in removed:
-                new_lines.append(f"{lo.directive_prefix()}if {expr_to_if(lo.br_hdr_cond)}")
+                new_lines.append(f"{lo.directive_prefix()}if {expr_to_if(lo.branch_header_cond)}")
                 continue
 
         if lo.is_directive_else():
-            blk_hdr_idx = lo.blk_hdr_idx
+            blk_hdr_idx = lo.block_header_index
             if blk_hdr_idx in removed:
                 new_lines.append(f"{lo.directive_prefix()}else")
                 continue
@@ -816,10 +816,10 @@ def detect_header_guard(objs, debug = False):
     endif_obj = objs[endif_idx]
 
     # if no blk_hdr_idx for the last endif, the source is broken
-    if endif_obj.blk_hdr_idx is None:
+    if endif_obj.block_header_index is None:
         return None
 
-    if_idx = endif_obj.blk_hdr_idx
+    if_idx = endif_obj.block_header_index
     if_obj = objs[if_idx]
 
     if debug:
@@ -834,7 +834,7 @@ def detect_header_guard(objs, debug = False):
 
     # extract a macro used for header guard
     #   confirm br_hdr_cond has one macro only
-    br_hdr_macros = if_obj.br_hdr_cond.macros()
+    br_hdr_macros = if_obj.branch_header_cond.macros()
     if len(br_hdr_macros) != 1:
         return None
 
@@ -1000,7 +1000,7 @@ def main():
             guard_start, guard_define, guard_end, guard_macro = guard
             for idx in [guard_start, guard_define, guard_end]:
                 objs[idx].directive   = DirectiveKind.DISABLED
-                objs[idx].br_hdr_cond = None
+                objs[idx].branch_header_cond = None
 
     propagate_acc_cond(objs)
 
