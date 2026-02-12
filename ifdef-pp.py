@@ -554,12 +554,12 @@ def collect_if_blocks(objs):
             }
     """
     if_blocks = {}
-    stack = []
+    idx_stack = []
 
     for idx, lo in enumerate(objs):
         if lo.is_directive_iflike():
             if_blocks[idx] = {"branches": [idx], "end": None}
-            stack.append(idx)
+            idx_stack.append(idx)
 
         elif lo.is_directive_elselike():
             blk_hdr_idx = lo.blk_hdr_idx
@@ -570,8 +570,8 @@ def collect_if_blocks(objs):
             blk_hdr_idx = lo.blk_hdr_idx
             if blk_hdr_idx in if_blocks:
                 if_blocks[blk_hdr_idx]["end"] = idx
-            if stack:
-                stack.pop()
+            if idx_stack:
+                idx_stack.pop()
 
     return if_blocks
 
